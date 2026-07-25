@@ -1,0 +1,220 @@
+PROJECT POLARIS DESIGN DECISIONS AND JUSTIFICATIONS
+===================================================
+
+1. DETERMINISTIC LAYERED CONTROL
+--------------------------------
+Problem:
+  A learned end-to-end policy would make command provenance and failure
+  handling difficult to audit in a safety-oriented student project.
+
+Choice:
+  Mission policy, local navigation, active perception, reactive avoidance, and
+  final safety are explicit deterministic layers.
+
+Alternative:
+  An end-to-end learned navigation/control policy.
+
+Trade-off:
+  The selected design is less adaptive but each command, clamp, abort, and
+  landing reason is inspectable and testable.
+
+2. SEPARATE FINAL SAFETY GATE
+-----------------------------
+Problem:
+  Avoidance policy and safety enforcement solve different problems.
+
+Choice:
+  SafetySupervisor evaluates the already rewritten avoidance decision and is
+  the final application component before command transmission.
+
+Alternative:
+  Fold all checks into ReactiveAvoidanceController.
+
+Trade-off:
+  A separate component adds interfaces, but preserves defense in depth and a
+  single auditable SafeMotion boundary.
+
+3. VLM IN SHADOW MODE
+----------------------
+Problem:
+  Semantic models add useful scene descriptions but also latency,
+  hallucination, availability, and nondeterminism risks.
+
+Choice:
+  VLM, temporal fusion, semantic validation, and Ego-Context observe and report
+  after deterministic decisions. They do not enter the safety/control path.
+
+Alternative:
+  Let semantic output complete waypoints or choose control actions.
+
+Trade-off:
+  This limits semantic autonomy, but permits evaluation without giving an
+  optional model authority over flight safety.
+
+4. DETERMINISTIC OBSERVATION COMPLETION
+---------------------------------------
+Problem:
+  Reaching a coordinate is not enough to represent a stable observation, while
+  VLM-only completion would be difficult to reproduce.
+
+Choice:
+  Gate completion on configured local geometry, heading, health, stability,
+  risk, speed, dwell, collision-free state, and fresh depth evidence.
+
+Alternative:
+  Position-only completion or VLM/object-detector-only completion.
+
+Trade-off:
+  The current method is reproducible but only proves observation conditions at
+  a configured target waypoint, not visual recognition or metric range.
+
+5. DISTINCT INFERENCE FRAMES FOR DWELL
+--------------------------------------
+Problem:
+  A 10 Hz control loop can read the same slower depth result multiple times.
+
+Choice:
+  Require a new source frame sequence and increasing inference timestamp before
+  counting observation evidence.
+
+Alternative:
+  Count every control-loop tick spent inside thresholds.
+
+Trade-off:
+  Completion latency follows depth inference rate, but stale evidence cannot be
+  multiplied into false confidence.
+
+6. BOUNDED YAW-ONLY ACTIVE PERCEPTION
+-------------------------------------
+Problem:
+  Poor texture or glare may require another view, but exploratory translation
+  increases collision exposure.
+
+Choice:
+  Temporarily use bounded hover/yaw recovery and observation dwell behavior.
+
+Alternative:
+  Translational next-best-view planning.
+
+Trade-off:
+  Yaw-only recovery is simpler and safer, but cannot solve viewpoints requiring
+  a new physical position.
+
+7. LATEST-FRAME BACKGROUND WORKERS
+----------------------------------
+Problem:
+  Depth and VLM inference are slower than camera arrival and can accumulate
+  stale queued work.
+
+Choice:
+  DepthWorker and VLMWorker retain bounded latest-frame work rather than an
+  unbounded FIFO backlog.
+
+Alternative:
+  Process every frame in arrival order.
+
+Trade-off:
+  Frames may be dropped, but output latency and memory remain bounded and the
+  consumer receives more recent evidence.
+
+8. RELATIVE DEPTH AND COARSE RISK GRID
+--------------------------------------
+Problem:
+  The simulator integration needs obstacle response without requiring an
+  additional metric depth sensor.
+
+Choice:
+  Convert monocular relative pseudo-depth into visual health and a 3x3 risk
+  grid for deterministic reactive control.
+
+Alternative:
+  Calibrated stereo, LiDAR, dense occupancy mapping, and trajectory planning.
+
+Trade-off:
+  The selected path is accessible and computationally bounded, but cannot make
+  metric-clearance or map-completeness claims.
+
+9. HEURISTIC BOUNDED REPLANNING
+--------------------------------
+Problem:
+  A failed viewpoint may benefit from one nearby staging objective, while an
+  unrestricted planner could violate demo bounds.
+
+Choice:
+  Generate at most the configured number of nearby staging waypoints subject
+  to offset, duration, path, displacement, and world limits.
+
+Alternative:
+  Global graph/search planning over an occupancy map.
+
+Trade-off:
+  Bounded insertion is explainable and auditable, but does not prove the path
+  to the generated point is globally collision-free.
+
+10. SCOPED TEMPORAL EMERGENCY CONFIRMATION
+------------------------------------------
+Problem:
+  One noisy relative-depth frame can show emergency centre risk during a
+  stationary sensing maneuver.
+
+Choice:
+  Permit temporal confirmation only for recognized active-perception ownership
+  with exactly zero translation. Ordinary translation, collision, stale state,
+  and stale required perception fail immediately. Timeout confirms uncertainty.
+
+Alternative:
+  Confirm all emergencies temporally, or abort every case immediately.
+
+Trade-off:
+  The selected scope avoids delaying ordinary-motion hazards while reducing
+  sensitivity to one stationary pseudo-depth sample.
+
+11. ONE-WAY IMMUTABLE EGO-CONTEXT
+---------------------------------
+Problem:
+  A shared writable blackboard can create hidden coupling between semantic
+  interpretation and control.
+
+Choice:
+  Project runtime state one way into typed semantic context, expose immutable
+  snapshots, and retain bounded edge-triggered events.
+
+Alternative:
+  Allow all modules to read and write a common blackboard.
+
+Trade-off:
+  One-way memory is easier to reason about and audit, but cannot directly adapt
+  behavior without a future explicit, safety-reviewed interface.
+
+12. ONE INTEGRATED MAVSDK OWNER
+-------------------------------
+Problem:
+  Multiple command-capable processes could contend for Offboard ownership and
+  complicate terminal cleanup.
+
+Choice:
+  The integrated mission owns one OwnedMavsdkSystem and the lifecycle of its
+  sensor workers, display, collision monitor, landing, and shutdown.
+
+Alternative:
+  Separate command, perception, and UI processes with multiple MAVSDK clients.
+
+Trade-off:
+  A single owner simplifies authority and cleanup but provides less process
+  isolation and is currently a single-vehicle architecture.
+
+13. COMPRESSED JSON ARTIFACTS
+-----------------------------
+Problem:
+  Full image/depth retention is large and unnecessary for every control tick.
+
+Choice:
+  Persist sampled states, decisions, transitions, mission outcomes, and
+  configuration in JSON.
+
+Alternative:
+  Persist synchronized raw RGB, depth maps, PX4 ULog, and simulator logs.
+
+Trade-off:
+  Artifacts are compact and replayable, but cannot reconstruct the original
+  visual scene or transient semantic results.

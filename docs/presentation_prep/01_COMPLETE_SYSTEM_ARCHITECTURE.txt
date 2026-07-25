@@ -1,0 +1,242 @@
+PROJECT POLARIS COMPLETE SYSTEM ARCHITECTURE
+============================================
+
+LEGEND
+------
+[D] Deterministic flight-control path
+[P] Perception and state-estimation input path
+[S] Safety path
+[M] Semantic observer path
+[O] Observability and durable evidence path
+
+Solid arrows ending at PX4 belong to the deterministic command path.
+Semantic and observability arrows terminate at memory, display, or reports.
+
+COMPLETE ARCHITECTURE
+---------------------
+
+  +-----------------------------------------------------------------------+
+  | ANTARCTIC GAZEBO SIMULATION                                            |
+  | simulation/worlds/polaris_antarctica.sdf                              |
+  |                                                                       |
+  |  +------------------+        +-------------------+                     |
+  |  | X500 RGB camera  |        | contact sensors   |                     |
+  |  +--------+---------+        +---------+---------+                     |
+  |           | [P]                        | [S]                            |
+  +-----------|----------------------------|-------------------------------+
+              v                            v
+  +-----------------------+      +------------------------+
+  | GazeboCameraSubscriber|      | CollisionMonitor       |
+  | one transport node    |      | latched contact state  |
+  | latest CameraFrame    |      | expected ground filter |
+  +-----------+-----------+      +------------+-----------+
+              | [P]                           | [S]
+              v                               |
+  +-----------------------------------------------------------------------+
+  | EgoStateCoordinator                                                    |
+  | owns one camera subscriber, one TelemetryCollector, one DepthWorker,   |
+  | and optional one VLMWorker                                             |
+  |                                                                       |
+  |  RGB frame ---> VisualHealthAnalyzer ---> NavigationState.visual      |
+  |       |                                                               |
+  |       +----> DepthWorker (one latest pending frame)                    |
+  |       |        -> Depth Anything V2 Small                              |
+  |       |        -> relative pseudo-depth / 3x3 risk                     |
+  |       |        -> DepthState -> NavigationState.depth                  |
+  |       |                                                               |
+  |       +----> optional VLMWorker [M]                                    |
+  |                -> JPEG -> VLMService -> Ollama -> qwen2.5vl:7b         |
+  |                -> immutable VLMSceneState                              |
+  |                                                                       |
+  |  PX4 telemetry ------------------------> shared NavigationState         |
+  +------------------------+----------------------------------------------+
+                           | copied snapshot [P]
+                           v
+  +-----------------------------------------------------------------------+
+  | SINGLE INTEGRATED MISSION RUNTIME: scripts/mission_demo.py             |
+  |                                                                       |
+  | MissionPlan --> MissionOrchestrator [D]                                |
+  |                  |                                                    |
+  |                  +--> POSITION waypoint -------------------+           |
+  |                  |                                         |           |
+  |                  +--> OBSERVATION waypoint                 |           |
+  |                         -> ObservationTracker              |           |
+  |                         -> deterministic dwell criteria    |           |
+  |                                                           v           |
+  | NavigationState --> ConfidenceEngine                 current goal      |
+  |                                                           |           |
+  |                                                           v           |
+  |                  LocalGoalNavigator [D] ---> DesiredMotion              |
+  |                                               |                       |
+  |                  ActivePerceptionManager [D] --+                       |
+  |                  recovery / observation yaw ownership                  |
+  |                                               |                       |
+  |                                               v                       |
+  |                  ReactiveAvoidanceController [D]                       |
+  |                  clear / caution / side / retreat / hover              |
+  |                                               |                       |
+  | CollisionState -------------------------------+                       |
+  | NavigationState + ConfidenceReport -----------+                       |
+  |                                               v                       |
+  |                  SafetySupervisor [S, final application gate]          |
+  |                  clamp / hover / hard abort / recommend land           |
+  |                                               |                       |
+  |                                               v                       |
+  |                           SafeMotion -> command validation -> _send     |
+  +---------------------------------------------------------------+-------+
+                                                                  | [D]
+                                                                  v
+  +-----------------------+       MAVLink/Offboard       +----------------+
+  | one OwnedMavsdkSystem |---------------------------->| PX4 SITL       |
+  | one owned server      |<----------------------------| stabilization  |
+  +-----------------------+       telemetry             | estimators     |
+                                                          +-------+--------+
+                                                                  |
+                                                                  v
+                                                          Gazebo X500 model
+
+  OBSERVER AND EVIDENCE SIDE - NO COMMAND ARROW TO PX4
+  ====================================================
+
+  authoritative mission/navigation/perception/safety records
+                           |
+                           v [O]
+  +-----------------------------------------------------------------------+
+  | EgoContextCoordinator                                                  |
+  | one-way RuntimeContextProjection                                       |
+  |                                                                       |
+  | raw VLMSceneState [M] -> SemanticFusion -> FusedSceneContext           |
+  | deterministic observation outcome + semantic evidence                 |
+  |                         -> shadow SemanticObservationValidator          |
+  |                                                                       |
+  | edge detection -> semantic events                                      |
+  +----------------------------+------------------------------------------+
+                               | [O]
+                               v
+  +-----------------------------------------------------------------------+
+  | EgoContextMemory                                                       |
+  | MissionContext | NavigationContext | PerceptionContext                 |
+  | SafetyContext  | MissionSummary    | bounded EgoContextEvent timeline  |
+  | immutable EgoContextSnapshot                                           |
+  +----------------------+-------------------------------+----------------+
+                         | [O]                           | [O]
+                         v                               v
+              +---------------------+        +----------------------------+
+              | integrated Operator |        | stdout Ego-Context report  |
+              | View                |        | transient semantic result  |
+              +---------------------+        +----------------------------+
+
+  authoritative runtime records [O]
+              |
+              v
+  +---------------------------+       +-------------------------------+
+  | mission artifact JSON     |------>| mission replay text           |
+  | schema version 1          |       | deterministic timeline        |
+  +---------------------------+       +-------------------------------+
+
+  IMPORTANT NEGATIVE PATH
+  -----------------------
+  VLMService, VLMWorker, SemanticFusion, SemanticObservationValidator,
+  EgoContextCoordinator, EgoContextMemory, and Operator View expose no path
+  that produces SafeMotion or calls MAVSDK Offboard. They observe and annotate
+  results after deterministic command decisions.
+
+SUBSYSTEM OWNERSHIP
+-------------------
+
+Antarctic Gazebo simulation
+  Owns the simulated world, static geometry, X500 model, RGB sensor, contact
+  sensors, and simulator physics. The world is deterministic and primitive;
+  it is not a photorealistic or scientifically calibrated Antarctic model.
+
+PX4 SITL
+  Owns flight stabilization, estimator state, arming, Offboard acceptance,
+  landing behavior, and the physical simulated vehicle response. Polaris does
+  not replace the flight controller.
+
+OwnedMavsdkSystem
+  Owns exactly one MAVSDK System and one packaged mavsdk_server inside one
+  integrated mission process. It is the runtime transport and command owner.
+
+TelemetryCollector
+  Owns seven MAVSDK telemetry stream tasks over that one System. It writes the
+  shared NavigationState but issues no commands.
+
+GazeboCameraSubscriber
+  Owns the single Gazebo RGB subscription for the integrated runtime. It
+  decodes supported formats to BGR and retains only the latest frame.
+
+EgoStateCoordinator
+  Owns the transient sensor pipeline and lifecycle. It starts/stops telemetry,
+  camera, depth, optional VLM, and one visual-analysis task. It is the only
+  integrated source of the shared NavigationState.
+
+DepthWorker / Depth Anything V2
+  Owns one bounded latest-frame worker thread. It produces relative,
+  non-metric pseudo-depth, temporal stability, health, and a 3x3 proximity
+  grid. Its output is safety-relevant through deterministic consumers, but it
+  does not issue commands itself.
+
+MissionPlan and MissionOrchestrator
+  The plan owns configured waypoints and bounded policies. The orchestrator is
+  authoritative for phase, current waypoint, attempts, completion, retry,
+  skip, replan, abort, and terminal mission result.
+
+ObservationTracker
+  Owns deterministic evidence for an OBSERVATION waypoint. It can declare
+  readiness/completion only from geometry, health, freshness, risk, speed,
+  dwell, and fresh-frame count. It never calls MAVSDK.
+
+LocalGoalNavigator
+  Owns ordinary requested motion toward the current resolved local NED goal.
+  It also owns local progress, completion hold, and bounded failure metrics.
+
+ActivePerceptionManager
+  Conditionally owns requested motion during visual/depth recovery and during
+  observation dwell. Current recovery is yaw-only/hover-only; it does not
+  implement translational active-SLAM exploration.
+
+ReactiveAvoidanceController
+  Owns deterministic reactive rewriting of requested motion based on the 3x3
+  risk grid and health. It can slow, sidestep, retreat, hover, or abort.
+
+SafetySupervisor
+  Is the final application-side authority before transmission. It consumes
+  the candidate command, confidence, telemetry freshness, collision evidence,
+  Offboard expectation, bounds, and emergency confirmation state. Only its
+  SafeMotion output is transmitted.
+
+VLMService / Ollama / qwen2.5vl:7b
+  Own optional structured scene inference. The service verifies health/model,
+  sends a JSON-only prompt, validates exact typed fields, and degrades failures
+  into typed statuses. It is disabled unless --vlm is supplied.
+
+VLMWorker
+  Owns one optional latest-frame thread. It serializes inference, replaces
+  pending frames, and publishes only fresh successful semantics. It has no
+  command API.
+
+SemanticFusion
+  Owns a synchronous five-observation, age-bounded semantic window inside the
+  EgoContextCoordinator. It rejects stale, duplicate, out-of-order, and
+  low-confidence inputs and produces immutable fused belief.
+
+SemanticObservationValidator
+  Owns shadow comparison between an already-determined observation outcome and
+  fused or single-frame evidence. It records an annotation; it cannot change
+  the outcome.
+
+EgoContextCoordinator and EgoContextMemory
+  Own one-way semantic projection and transient working memory. Controllers do
+  not read this memory to create commands.
+
+Operator View
+  Owns rendering only. In the integrated mission it receives the same runtime
+  state and immutable Ego-Context snapshot. It is not a ground-control station.
+
+Mission artifacts and replay
+  Own durable deterministic evidence. Artifacts contain mission plans,
+  transitions, compressed samples, collision evidence, outcomes, and landing
+  results. The current schema intentionally does not persist VLM/fusion or
+  Ego-Context fields; the replay therefore remains deterministic and backward
+  compatible.

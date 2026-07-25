@@ -1,0 +1,40 @@
+{
+  "mission_id": "failure-demo",
+  "name": "Optional Waypoint Skip Mission",
+  "description": "Injects one bounded soft failure at an optional waypoint and continues.",
+  "failure_policy": "SKIP_OPTIONAL",
+  "maximum_duration_s": 120.0,
+  "maximum_path_length_m": 12.0,
+  "maximum_replans": 0,
+  "return_or_land_policy": "LAND_AT_CURRENT_POSITION",
+  "waypoints": [
+    {
+      "waypoint_id": "failure-entry",
+      "goal": {"north_offset_m": 0.0, "east_offset_m": 2.0, "timeout_s": 50.0},
+      "required": true,
+      "skippable": false,
+      "maximum_attempts": 1,
+      "verification_hold_s": 1.0,
+      "failure_action": "ABORT_MISSION"
+    },
+    {
+      "waypoint_id": "optional-blocked",
+      "goal": {"north_offset_m": 0.0, "east_offset_m": 4.0, "timeout_s": 40.0},
+      "required": false,
+      "skippable": true,
+      "maximum_attempts": 1,
+      "verification_hold_s": 1.0,
+      "failure_action": "SKIP_OPTIONAL",
+      "metadata": {"controlled_soft_failure_after_s": 2.0}
+    },
+    {
+      "waypoint_id": "post-skip-staging",
+      "goal": {"north_offset_m": 0.0, "east_offset_m": 6.0, "timeout_s": 55.0},
+      "required": true,
+      "skippable": false,
+      "maximum_attempts": 1,
+      "verification_hold_s": 1.0,
+      "failure_action": "ABORT_MISSION"
+    }
+  ]
+}

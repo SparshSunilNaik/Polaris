@@ -1,0 +1,13 @@
+{
+  "normal_health_min": 0.75,
+  "cautious_health_min": 0.5,
+  "degraded_health_min": 0.25,
+  "battery_critical": 0.15,
+  "battery_low": 0.3,
+  "high_horizontal_speed_m_s": 3.0,
+  "visual_emergency_score": 0.15,
+  "exposure_critical_ratio": 0.8,
+  "texture_healthy": 12.0,
+  "features_healthy": 150,
+  "coverage_healthy": 0.5
+}

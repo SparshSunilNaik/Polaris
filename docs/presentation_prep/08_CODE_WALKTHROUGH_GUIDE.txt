@@ -1,0 +1,199 @@
+PROJECT POLARIS CODE WALKTHROUGH GUIDE
+======================================
+
+PURPOSE
+-------
+Use this order to show command authority first, then evidence and optional
+semantics. The paths and symbols below exist in the current implementation.
+
+1. INTEGRATED MISSION RUNTIME
+-----------------------------
+Open: scripts/mission_demo.py
+
+MissionDemo.run
+  Starts orchestration, waits for readiness, performs takeoff, enables the
+  optional observation-time VLM, runs the mission, and always enters terminal
+  hover/landing handling.
+
+MissionDemo._mission_loop
+  Selects the current waypoint and applies retry, skip, bounded-replan, abort,
+  or land policy after each waypoint outcome.
+
+MissionDemo._execute_waypoint
+  The highest-value code region. At 10 Hz it snapshots state, updates mission
+  bounds, navigation, active perception, deterministic observation, reactive
+  avoidance, final safety, command transmission, display, and artifacts.
+
+  Authoritative order:
+
+    LocalGoalNavigator.update
+             |
+             +--> ActivePerceptionManager.update/observation_hold_command
+             |
+             v
+    ObservationTracker.update        evidence only
+             |
+             v
+    ReactiveAvoidanceController.update
+             |
+             v
+    SafetySupervisor.evaluate
+             |
+             v
+    MissionDemo._send -> MAVSDK -> PX4
+
+  Observation completion is accepted only after command transmission succeeds
+  and SafeMotion.hard_override is false.
+
+MissionDemo._project_ego_context
+  Builds a one-way RuntimeContextProjection after control decisions. This is an
+  observer/annotation path, not an input to SafetySupervisor.
+
+MissionDemo._apply_bounded_replan
+  Tries a healthier-viewpoint staging waypoint, then a lateral staging point.
+  It accepts only a bounded generated waypoint.
+
+MissionDemo.mission_artifact
+  Serializes compressed mission evidence. Note the schema does not include the
+  Ego-Context report, VLM result, fused scene, or invocation flags.
+
+run_mission_live and main
+  Construct one integrated owner, load checked JSON, handle cancellation and
+  exceptions, stop workers, close MAVSDK, print the transient context report,
+  and write the artifact.
+
+2. MISSION CONTRACT AND POLICY
+-------------------------------
+Open: src/polaris/mission/models.py
+Show: MissionPlan, MissionWaypoint, MissionState, MissionPhase, MissionAction,
+      MissionResult, MissionOrchestratorConfig, WaypointCompletionMode.
+
+Open: src/polaris/mission/loader.py
+Show: load_mission, load_mission_file.
+
+Open: src/polaris/mission/orchestrator.py
+Show: MissionOrchestrator.start, prepare_waypoint, begin_waypoint,
+      verify_waypoint, complete_waypoint, fail_waypoint, apply_replan,
+      update_metrics, finish.
+
+Invariant: orchestration owns phase, waypoint policy, mission bounds, and final
+mission result. It does not bypass the command safety chain.
+
+3. DETERMINISTIC OBSERVATION
+-----------------------------
+Open: src/polaris/mission/observation.py
+Show: ObservationTracker.update, accept_completion, _invalid_reason,
+      _reset_dwell.
+
+Inputs include local-NED goal distance, heading error, visual/depth health,
+depth stability, centre risk, horizontal speed, collision state, active
+perception state, depth frame sequence, and inference timestamp.
+
+Invariant: a fresh observation requires a distinct nonzero depth sequence and
+a newer inference timestamp. Dwell follows inference evidence, not repeated
+control ticks. This is deterministic observation at a configured waypoint; it
+is not proof of visual object detection or metric rock range.
+
+4. LOCAL NAVIGATION AND ACTIVE PERCEPTION
+-----------------------------------------
+Open: src/polaris/navigation/local_goal.py
+Show: LocalGoalNavigator.start, update, complete_recovery, _bounded_failure.
+
+Open: src/polaris/navigation/active_perception.py
+Show: ActivePerceptionManager.recovery_trigger, trigger, update,
+      observation_hold_command.
+
+Open: src/polaris/navigation/viewpoint_scoring.py
+Show: ViewpointScorer.score.
+
+Invariant: active perception temporarily owns bounded hover/yaw motion. It does
+not own unconstrained translation and cannot bypass final safety.
+
+5. AVOIDANCE AND FINAL SAFETY
+-----------------------------
+Open: src/polaris/control/reactive_avoidance.py
+Show: ReactiveAvoidanceController.update, _choose_escape, _safer_direction,
+      _update_persistence.
+
+Open: src/polaris/control/safety_supervisor.py
+Show: SafetySupervisor.evaluate, _evaluate_emergency_confirmation,
+      _active_perception_owns_motion, _source_state_age_ms.
+
+Open: src/polaris/control/models.py
+Show: DesiredMotion, RiskSummary, AvoidanceDecision, SafeMotion.
+
+Invariant: upstream modules propose or rewrite commands; only SafeMotion reaches
+the sender. Semantic data is not an argument to SafetySupervisor.evaluate.
+
+6. SENSOR AND WORKER OWNERSHIP
+------------------------------
+Open: src/polaris/ego_state/coordinator.py
+Show: EgoStateCoordinator.start, stop, _run_visual_analysis,
+      set_vlm_observation_enabled.
+
+Open: src/polaris/ego_state/telemetry.py
+Show: TelemetryCollector.
+
+Open: src/polaris/perception/depth/worker.py
+Show: DepthWorker.submit, latest_state, _run.
+
+Open: src/polaris/perception/depth/processor.py
+Show: DepthProcessor.process.
+
+Open: src/polaris/control/mavsdk_runtime.py
+Show: OwnedMavsdkSystem.connect and close.
+
+Invariant: the integrated runtime owns one MAVSDK system and one lifecycle for
+telemetry, camera, depth, optional VLM, collision monitoring, and display.
+
+7. OPTIONAL SEMANTIC SHADOW PATH
+--------------------------------
+Open: src/polaris/vlm/service.py
+Show: VLMService.health_check, analyze, _parse_result.
+
+Open: src/polaris/vlm/worker.py
+Show: VLMWorker.submit, latest_state, _run.
+
+Open: src/polaris/vlm/fusion.py
+Show: SemanticFusion.update, _accepts, _fuse.
+
+Open: src/polaris/ego_context/coordinator.py
+Show: RuntimeContextProjection, EgoContextCoordinator.project, _ownership,
+      _record_semantic_validation.
+
+Open: src/polaris/ego_context/memory.py
+Show: EgoContextMemory.snapshot, record_event, _update.
+
+Invariant: the path consumes post-decision state, emits bounded semantic memory
+and validation, and has no PX4 or flight-command API.
+
+8. REPLANNING, ARTIFACTS, AND REPLAY
+------------------------------------
+Open: src/polaris/mission/replanner.py
+Show: BoundedMissionReplanner.generate_healthier_viewpoint_staging,
+      generate_lateral_staging, generate_previous_waypoint_retreat.
+
+Open: src/polaris/mission/artifacts.py
+Show: write_mission_artifact, append_supervisor_transition.
+
+Open: src/polaris/mission/replay.py
+Show: validate_mission_replay_payload, format_mission_replay.
+
+Invariant: replanning inserts limited staging objectives; it is not global
+mapping or path search. Replay validates and summarizes retained JSON but does
+not reconstruct raw perception or transient semantic stdout.
+
+FAST FIVE-MINUTE WALKTHROUGH
+----------------------------
+1. scripts/mission_demo.py: MissionDemo._execute_waypoint.
+2. src/polaris/control/safety_supervisor.py: SafetySupervisor.evaluate.
+3. src/polaris/mission/observation.py: ObservationTracker.update.
+4. src/polaris/ego_context/coordinator.py: project and ownership boundary.
+5. config/missions/polaris_demo.json: bounded mission contract.
+
+FILES NOT TO OVERCLAIM
+----------------------
+- Depth output is relative pseudo-depth, not calibrated range.
+- Collision injection is a labelled test fixture, not native impact evidence.
+- The landing-zone waypoint is surrogate staging before an unvalidated gate.
+- JSON artifacts are application evidence, not signed independent ground truth.

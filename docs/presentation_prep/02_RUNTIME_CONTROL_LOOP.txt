@@ -1,0 +1,242 @@
+PROJECT POLARIS RUNTIME AND CONTROL LOOP
+========================================
+
+SINGLE INTEGRATED RUNTIME
+-------------------------
+The current multi-waypoint runtime is scripts/mission_demo.py. MissionDemo
+inherits LocalGoalDemo, which inherits ReactiveAvoidanceDemo. The inheritance
+chain reuses one flight connection, one shared state pipeline, one avoidance
+controller, one safety supervisor, and one display.
+
+Within one mission process the runtime constructs:
+
+  exactly one OwnedMavsdkSystem
+  exactly one owned mavsdk_server subprocess
+  exactly one TelemetryCollector
+  exactly one GazeboCameraSubscriber
+  exactly one DepthWorker
+  zero or one VLMWorker, enabled only by --vlm
+  exactly one shared NavigationState
+  exactly one MissionOrchestrator
+  exactly one EgoContextMemory and EgoContextCoordinator
+
+This is an integrated-runtime property, not a global repository singleton.
+Standalone utilities can create their own MAVSDK systems and should not run at
+the same time against the same endpoint.
+
+RUNTIME CONSTRUCTION ORDER
+--------------------------
+main() in scripts/mission_demo.py:
+
+  1. Parse CLI arguments.
+  2. Load MissionOrchestratorConfig.
+  3. Load LocalNavigationConfig.
+  4. Load ActivePerceptionConfig.
+  5. Load AvoidanceConfig.
+  6. Optionally load VLMConfig when --vlm is present.
+  7. Load and validate the selected MissionPlan.
+  8. Apply inherited takeoff/landing settings.
+  9. Return immediately for --dry-run, or enter run_mission_live().
+
+run_mission_live():
+
+  DepthConfig
+      |
+      v
+  OwnedMavsdkSystem -> connect(udp://:14540)
+      |
+      +-> EgoStateCoordinator
+      |      +-> TelemetryCollector
+      |      +-> GazeboCameraSubscriber
+      |      +-> DepthWorker
+      |      +-> optional VLMWorker
+      |
+      +-> ConnectionMonitor
+      +-> MissionDemo command methods
+
+  ConfidenceEngine
+  IntegratedDisplay
+  CollisionMonitor
+  EgoContextMemory
+  EgoContextCoordinator with SemanticFusion
+  MissionDemo
+
+STARTUP AND READINESS
+---------------------
+EgoStateCoordinator.start() starts, in order:
+
+  camera subscription
+  seven telemetry tasks
+  DepthWorker thread
+  optional VLMWorker thread
+  one visual-analysis asyncio task
+
+MissionDemo.run() then:
+
+  SafetySupervisor.reset()
+  MissionOrchestrator.start() -> PREFLIGHT
+  EgoContextCoordinator.start_mission() -> memory/fusion reset
+  wait for connection, local position, armable state, RGB, and depth
+  require five consecutive healthy distinct depth updates
+  wait for Gazebo contact instrumentation
+
+The integrated visual-analysis task runs at max(10 Hz, 2 * target depth FPS).
+With current target depth FPS 3, it runs at 10 Hz.
+
+AUTHORITATIVE CONTROL-LOOP ORDER
+-------------------------------
+MissionDemo._execute_waypoint() executes the following order at the configured
+10 Hz local-navigation rate:
+
+  1. Copy NavigationState and atomically matching depth/proximity state.
+  2. Update mission path-length proxy.
+  3. Apply configured test injection, if the waypoint requests one.
+  4. Evaluate ConfidenceEngine.
+  5. Update collision vertical speed and read latched CollisionState.
+  6. Compute displacement from mission origin.
+  7. Update LocalGoalNavigator.
+  8. Update MissionOrchestrator bounds/metrics.
+  9. Evaluate ActivePerceptionManager recovery trigger.
+ 10. Trigger or update recovery when required.
+ 11. Select navigator, recovery, or failure-hover DesiredMotion.
+ 12. Update ObservationTracker for OBSERVATION waypoints.
+ 13. Replace translation with observation yaw-only hold when required.
+ 14. Update ReactiveAvoidanceController.
+ 15. Evaluate SafetySupervisor.
+ 16. Attach the resulting SafeMotion to the avoidance decision.
+ 17. Send SafeMotion through MAVSDK Offboard.
+ 18. Accept observation completion only after successful transmission and no
+     hard override.
+ 19. Project authoritative state to Ego-Context.
+ 20. Render Operator View and record compressed artifact data.
+ 21. Check hard override, failed transmission, bounds, recovery/navigation
+     failure, operator stop, observation completion, or position completion.
+ 22. Sleep to the next 10 Hz deadline.
+
+ONE-ITERATION SEQUENCE DIAGRAM
+------------------------------
+
+ Mission   Shared      Local/Active   Reactive      Safety      MAVSDK/PX4
+ runtime   state       navigation     avoidance     supervisor  and observers
+    |        |              |              |             |            |
+    | copy   |              |              |             |            |
+    |<-------|              |              |             |            |
+    | ConfidenceEngine      |              |             |            |
+    |-----------------------|              |             |            |
+    | navigator.update(state, previous avoidance/recovery)             |
+    |---------------------->|              |             |            |
+    |<----------------------| DesiredMotion|             |            |
+    | recovery trigger/update or observation yaw-only hold             |
+    |---------------------->|              |             |            |
+    |<----------------------| selected request                          |
+    | avoidance.update(request, depth risk, health)                     |
+    |------------------------------------->|             |            |
+    |<-------------------------------------| proposed command           |
+    | supervisor.evaluate(command, state, confidence, collision)        |
+    |--------------------------------------------------->|            |
+    |<---------------------------------------------------| SafeMotion |
+    | _send(SafeMotion)                                                |
+    |--------------------------------------------------------------->|
+    |<---------------------------------------------------------------| success/error
+    | accept deterministic completion only after successful send       |
+    |                                                                  |
+    | EgoContextCoordinator.project(authoritative records + VLM state)  |
+    |---------------------------------------------------------------+  |
+    | Operator View render and artifact sampling                    |  |
+    |---------------------------------------------------------------+  |
+    |                                                                  |
+    | sleep to next 10 Hz tick                                         |
+
+COMMAND PATH
+------------
+Ordinary flight:
+
+  LocalGoalNavigator DesiredMotion
+        or ActivePerceptionManager replacement
+        -> ReactiveAvoidanceController
+        -> AvoidanceDecision proposed command
+        -> SafetySupervisor
+        -> SafeMotion
+        -> ReactiveAvoidanceDemo._send()
+        -> drone.offboard.set_velocity_body(VelocityBodyYawspeed)
+        -> PX4 Offboard
+
+Takeoff uses position setpoints through set_position_ned(), then switches to a
+zero body-velocity hover after reaching altitude. Landing uses action.land()
+after a final hover and Offboard stop.
+
+AUTHORITATIVE COMPONENTS
+------------------------
+PX4
+  Final physical/simulated flight authority and stabilization.
+
+MissionOrchestrator
+  Mission phase, waypoint selection, attempts, completion, policy, replan,
+  skip, abort, and result.
+
+LocalGoalNavigator
+  Ordinary local-goal requested motion and local completion/failure metrics.
+
+ActivePerceptionManager
+  Conditional requested-motion owner during recovery and observation dwell.
+
+ReactiveAvoidanceController
+  Deterministic reactive override before final supervision.
+
+SafetySupervisor
+  Final application-side command gate. Only SafeMotion is transmitted.
+
+OBSERVERS AND STATE PRODUCERS
+-----------------------------
+TelemetryCollector, camera, visual health, and depth produce the state consumed
+by deterministic logic. They issue no commands, although stale or unsafe
+outputs can cause authoritative safety logic to abort.
+
+CollisionMonitor supplies latched safety evidence but does not command PX4.
+
+VLMWorker, SemanticFusion, SemanticObservationValidator, EgoContextCoordinator,
+EgoContextMemory, Operator View, artifacts, and replay are observer or
+observability components. They do not produce SafeMotion.
+
+SHUTDOWN, LANDING, AND DISARM
+-----------------------------
+For an armed flight, MissionDemo.run() has terminal handling in finally:
+
+  disable new VLM submissions
+  MissionOrchestrator.begin_return_or_land()
+  shielded final zero-velocity hover
+  stop Offboard when active
+  action.land()
+  permit expected snow-ground contact classification
+  wait up to 45 seconds for fresh in_air == false
+  attempt action.disarm()
+  wait up to 5 seconds for fresh armed == false
+  mark landing and finish mission
+  project terminal Ego-Context
+
+Cancellation uses asyncio.shield so Ctrl+C does not cancel the landing task.
+The outer runtime then closes, in order:
+
+  IntegratedDisplay
+  CollisionMonitor
+  EgoStateCoordinator:
+      visual task
+      VLMWorker
+      DepthWorker
+      camera subscription
+      telemetry tasks
+  ConnectionMonitor
+  OwnedMavsdkSystem and its server
+
+Landing result is CONFIRMED only after fresh post-command landed and disarmed
+telemetry. No-flight mode never arms and reports landing NOT_ATTEMPTED with
+replay disarm interpretation NOT_REQUIRED.
+
+IMPORTANT INVARIANTS
+--------------------
+- No controller reads EgoContextMemory to generate a command.
+- VLM/fusion validation occurs after deterministic decisions in the tick.
+- Observation evidence alone is not accepted until a safe command was sent.
+- The SafetySupervisor can override every upstream application command.
+- One integrated mission process owns one MAVSDK System and shared workers.
+- Image and pseudo-depth arrays remain transient; artifacts store summaries.

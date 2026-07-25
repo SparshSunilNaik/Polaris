@@ -1,0 +1,19 @@
+{
+  "takeoff_altitude_m": 2.5,
+  "yaw_rate_deg_s": 20.0,
+  "yaw_tolerance_deg": 5.0,
+  "max_horizontal_drift_m": 1.5,
+  "settle_duration_s": 2.0,
+  "sample_duration_s": 2.5,
+  "analysis_rate_hz": 10.0,
+  "viewpoints": [
+    {"name": "east_corridor", "gazebo_yaw_deg": 0.0, "px4_yaw_deg": 90.0},
+    {"name": "northeast_rocks", "gazebo_yaw_deg": 45.0, "px4_yaw_deg": 45.0},
+    {"name": "north_rocks", "gazebo_yaw_deg": 90.0, "px4_yaw_deg": 0.0},
+    {"name": "northwest_glare", "gazebo_yaw_deg": 135.0, "px4_yaw_deg": -45.0},
+    {"name": "west_snowfield", "gazebo_yaw_deg": 180.0, "px4_yaw_deg": -90.0},
+    {"name": "southwest_snow", "gazebo_yaw_deg": -135.0, "px4_yaw_deg": -135.0},
+    {"name": "south_station", "gazebo_yaw_deg": -90.0, "px4_yaw_deg": 180.0},
+    {"name": "southeast_corridor", "gazebo_yaw_deg": -45.0, "px4_yaw_deg": 135.0}
+  ]
+}

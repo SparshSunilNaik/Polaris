@@ -1,0 +1,91 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.venv/
+venv/
+env/
+
+# macOS
+.DS_Store
+
+# Editors and IDEs
+.vscode/
+.idea/
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.swp
+*~
+
+# Build products
+build/
+dist/
+*.o
+*.so
+*.a
+*.dylib
+
+# Gazebo and PX4 generated output
+PX4-Autopilot/build/
+PX4-Autopilot/.polaris-sim/
+*.ulg
+
+# Mission and media outputs
+artifacts/
+recordings/
+videos/
+screenshots/
+
+# Large archives and media
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.zip
+*.tar
+*.gz
+
+# Models, checkpoints, and downloaded model data
+models/
+checkpoints/
+weights/
+*.onnx
+*.pt
+*.pth
+*.bin
+*.gguf
+.ollama/
+ollama/
+
+# Environment and local secrets
+.env
+.env.*
+
+# Caches and datasets
+.cache/
+data/
+datasets/
+
+# Keep the upstream PX4 checkout as a separate repository. Track only the
+# Polaris-owned setup documentation and launch scripts stored within it.
+PX4-Autopilot/*
+!PX4-Autopilot/docs/
+PX4-Autopilot/docs/*
+!PX4-Autopilot/docs/MAC_SIM_SETUP.md
+!PX4-Autopilot/scripts/
+PX4-Autopilot/scripts/*
+!PX4-Autopilot/scripts/start_polaris_sim.sh
+!PX4-Autopilot/scripts/stop_polaris_sim.sh

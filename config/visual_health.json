@@ -1,0 +1,23 @@
+{
+  "stale_after_ms": 500.0,
+  "brightness_critical_low": 15.0,
+  "brightness_healthy_low": 55.0,
+  "brightness_healthy_high": 210.0,
+  "brightness_critical_high": 245.0,
+  "contrast_critical": 8.0,
+  "contrast_healthy": 35.0,
+  "exposure_pixel_low": 5,
+  "exposure_pixel_high": 250,
+  "exposure_degraded_ratio": 0.15,
+  "exposure_critical_ratio": 0.8,
+  "blur_critical": 20.0,
+  "blur_healthy": 100.0,
+  "texture_critical": 2.0,
+  "texture_healthy": 12.0,
+  "features_critical": 20,
+  "features_healthy": 150,
+  "coverage_critical": 0.125,
+  "coverage_healthy": 0.5,
+  "healthy_score": 0.7,
+  "critical_score": 0.35
+}

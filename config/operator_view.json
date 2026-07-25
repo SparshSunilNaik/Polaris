@@ -1,0 +1,12 @@
+{
+  "window_width": 1600,
+  "window_height": 900,
+  "target_display_fps": 10.0,
+  "depth_device": "auto",
+  "target_depth_fps": 3.0,
+  "rgb_grid_overlay": true,
+  "screenshot_output_dir": "artifacts/operator_screenshots",
+  "visual_config": "config/visual_health.json",
+  "depth_config": "config/depth_anything.json",
+  "confidence_config": "config/confidence.json"
+}

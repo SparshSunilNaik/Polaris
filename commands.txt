@@ -1,0 +1,307 @@
+PROJECT POLARIS - COMMAND CHEAT SHEET
+=====================================
+
+0. FIRST-TIME / ENVIRONMENT
+---------------------------
+cd ~/Documents/Polaris
+./.venv/bin/pip install -r requirements-depth.txt
+./.venv/bin/pip check
+
+# No standalone MAVSDK process is required. Each Polaris app starts its own.
+# Keep the simulator terminal open. Run one MAVSDK-based Polaris app at a time.
+
+1. START ANTARCTIC SIMULATION
+-----------------------------
+cd ~/Documents/Polaris/PX4-Autopilot
+POLARIS_WORLD=antarctica ./scripts/start_polaris_sim.sh
+
+# Default PX4 world instead:
+cd ~/Documents/Polaris/PX4-Autopilot
+./scripts/start_polaris_sim.sh
+
+2. STOP SIMULATION
+------------------
+cd ~/Documents/Polaris/PX4-Autopilot
+./scripts/stop_polaris_sim.sh
+
+3. OPERATOR VIEW
+----------------
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/operator_view.py
+
+# Save one screenshot automatically after RGB and depth are ready:
+./.venv/bin/python scripts/operator_view.py --save-screenshots
+
+4. OPERATOR VIEW WITHOUT DEPTH
+------------------------------
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/operator_view.py --no-depth
+
+5. CAMERA-ONLY VIEW
+-------------------
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/camera_health_monitor.py --display
+
+6. DEPTH-ONLY VIEW
+------------------
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/depth_monitor.py --display
+
+# CPU fallback:
+./.venv/bin/python scripts/depth_monitor.py --device cpu --target-fps 2 --display
+
+7. EGO STATE MONITOR
+--------------------
+cd ~/Documents/Polaris
+./.venv/bin/python ego_state_monitor.py
+
+8. FIRST AUTONOMOUS FLIGHT
+--------------------------
+cd ~/Documents/Polaris
+./.venv/bin/python src/first_flight.py
+
+9. OFFBOARD MOVEMENT TEST
+-------------------------
+cd ~/Documents/Polaris
+./.venv/bin/python src/offboard_movement.py
+
+10. VIEWPOINT BENCHMARK
+-----------------------
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/viewpoint_benchmark.py
+
+# Configuration check without connecting or flying:
+./.venv/bin/python scripts/viewpoint_benchmark.py --dry-run
+
+11. DEPTH VIEWPOINT BENCHMARK
+-----------------------------
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/depth_viewpoint_benchmark.py
+
+# Configuration check without connecting or flying:
+./.venv/bin/python scripts/depth_viewpoint_benchmark.py --dry-run
+
+12. RUN TESTS
+-------------
+cd ~/Documents/Polaris
+PYTHONDONTWRITEBYTECODE=1 ./.venv/bin/python -m unittest discover -s tests -v
+
+13. CHECK PROCESSES
+-------------------
+pgrep -alf 'gz sim|px4|mavsdk_server|operator_view|reactive_avoidance|local_goal_demo|camera_health_monitor|depth_monitor|ego_state_monitor|viewpoint_benchmark'
+
+14. VIEW LOGS
+-------------
+less ~/Documents/Polaris/PX4-Autopilot/.polaris-sim/px4.log
+less ~/Documents/Polaris/PX4-Autopilot/.polaris-sim/gazebo-server.log
+less ~/Documents/Polaris/PX4-Autopilot/.polaris-sim/gazebo-gui.log
+
+15. TROUBLESHOOTING
+-------------------
+# Stop cleanly first, then check processes before restarting.
+cd ~/Documents/Polaris/PX4-Autopilot
+./scripts/stop_polaris_sim.sh
+pgrep -alf 'gz sim|px4|mavsdk_server|operator_view'
+
+# Validate the Antarctic world and Python dependencies.
+cd ~/Documents/Polaris
+gz sdf -k simulation/worlds/polaris_antarctica.sdf
+./.venv/bin/pip check
+
+16. DEMO ORDER
+--------------
+# Terminal 1 - keep this running:
+cd ~/Documents/Polaris/PX4-Autopilot
+POLARIS_WORLD=antarctica ./scripts/start_polaris_sim.sh
+
+# Terminal 2 - launch after PX4 and Gazebo are ready:
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/operator_view.py
+
+# Expect live RGB, relative pseudo-depth, risk grid, telemetry, and safety state.
+# Terminal 3 is not needed for the observation demo.
+# For a flight demo, press q in Operator View first, then run one flight app:
+cd ~/Documents/Polaris
+./.venv/bin/python src/first_flight.py
+
+# Stop everything cleanly when finished:
+cd ~/Documents/Polaris/PX4-Autopilot
+./scripts/stop_polaris_sim.sh
+
+17. KEYBOARD CONTROLS
+---------------------
+q / Escape  Quit Operator View cleanly
+p           Pause display rendering only; perception and safety keep running
+s           Save one screenshot under artifacts/operator_screenshots/
+h           Toggle help overlay
+g           Toggle 3x3 guide lines over RGB
+
+18. REACTIVE AVOIDANCE DEMO WITH DISPLAY
+----------------------------------------
+# Simulator-only. One process owns flight, perception, safety, and display.
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/reactive_avoidance_demo.py --display
+
+# Run without the integrated Operator View:
+./.venv/bin/python scripts/reactive_avoidance_demo.py --no-display
+
+19. REACTIVE AVOIDANCE CONFIG / SYNTHETIC TEST
+----------------------------------------------
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/reactive_avoidance_demo.py --config config/reactive_avoidance.json --dry-run --no-display
+./.venv/bin/python scripts/reactive_avoidance_demo.py --scenario synthetic-grid-test --no-display
+
+20. REACTIVE AVOIDANCE NO-FLIGHT READINESS
+------------------------------------------
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/reactive_avoidance_demo.py --no-flight --duration 10 --display
+
+21. STALE-DEPTH SAFETY TEST
+---------------------------
+# Takes off, injects stale required depth, hovers, and lands.
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/reactive_avoidance_demo.py --scenario stale-depth-test --duration 10 --display
+
+# Inject degraded low visual health; forward motion is refused, then the vehicle lands:
+./.venv/bin/python scripts/reactive_avoidance_demo.py --scenario low-visual-health-test --duration 8 --display
+
+22. AVOIDANCE ARTIFACTS
+-----------------------
+ls -lt ~/Documents/Polaris/artifacts/avoidance_runs/
+open ~/Documents/Polaris/artifacts/avoidance_runs/
+
+23. RECOMMENDED AVOIDANCE DEMO ORDER
+------------------------------------
+# Terminal 1:
+cd ~/Documents/Polaris/PX4-Autopilot
+POLARIS_WORLD=antarctica ./scripts/start_polaris_sim.sh
+
+# Terminal 2, after PX4 and Gazebo are ready:
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/reactive_avoidance_demo.py --no-flight --duration 10 --display
+
+# After no-flight mode exits, run the bounded flight from the takeoff zone:
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/reactive_avoidance_demo.py --scenario corridor --display
+
+24. CLEAN STOP AFTER AVOIDANCE
+------------------------------
+# Let the demo land and exit first. Then stop the simulator:
+cd ~/Documents/Polaris/PX4-Autopilot
+./scripts/stop_polaris_sim.sh
+pgrep -alf 'gz sim|px4|mavsdk_server|reactive_avoidance|operator_view'
+
+25. BOUNDED LOCAL-GOAL DEMO
+---------------------------
+# Antarctic simulator must be running. One process owns flight and display.
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/local_goal_demo.py --goal corridor-staging --display
+
+# Defaults: cruise 0.35 m/s, approach 0.12 m/s, tolerance 0.50 m,
+# hold 1.5 s, duration 60 s, path 15 m, displacement 13 m.
+
+26. PHYSICAL CENTRED-OBSTACLE DEMO
+----------------------------------
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/local_goal_demo.py --scenario centred-obstacle --display
+
+27. ACTIVE-PERCEPTION RECOVERY
+------------------------------
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/local_goal_demo.py --scenario low-texture-recovery --display
+./.venv/bin/python scripts/local_goal_demo.py --scenario glare-recovery --display
+./.venv/bin/python scripts/local_goal_demo.py --scenario no-acceptable-viewpoint --display
+
+28. NO-PROGRESS FAILURE TEST
+----------------------------
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/local_goal_demo.py --scenario no-progress-test --display
+
+29. COLLISION INSTRUMENTATION TEST
+----------------------------------
+# Explicit injected event; native contact topic remains active and logged.
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/local_goal_demo.py --scenario collision-test --display
+
+30. LOCAL-GOAL READINESS / CONFIG CHECK
+---------------------------------------
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/local_goal_demo.py --no-flight --no-display
+./.venv/bin/python scripts/local_goal_demo.py --config config/local_navigation.json --active-perception-config config/active_perception.json --dry-run --no-display
+
+31. NAVIGATION ARTIFACTS
+------------------------
+ls -lt ~/Documents/Polaris/artifacts/navigation_runs/
+open ~/Documents/Polaris/artifacts/navigation_runs/
+
+32. RECOMMENDED FRIEND DEMO
+---------------------------
+# Terminal 1:
+cd ~/Documents/Polaris/PX4-Autopilot
+POLARIS_WORLD=antarctica ./scripts/start_polaris_sim.sh
+
+# Terminal 2, verify readiness without arming:
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/local_goal_demo.py --no-flight --display
+
+# Then run one bounded flight app after no-flight mode exits:
+./.venv/bin/python scripts/local_goal_demo.py --goal corridor-staging --display
+
+33. CLEAN STOP AFTER LOCAL NAVIGATION
+-------------------------------------
+# Let the app land and exit first.
+cd ~/Documents/Polaris/PX4-Autopilot
+./scripts/stop_polaris_sim.sh
+pgrep -alf 'gz sim|px4|mavsdk_server|local_goal_demo|reactive_avoidance|operator_view'
+
+34. MISSION ORCHESTRATION — DRY-RUN VALIDATION (no simulator required)
+-----------------------------------------------------------------------
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/mission_demo.py --dry-run --mission two-point-demo --no-display
+./.venv/bin/python scripts/mission_demo.py --dry-run --mission recovery-demo --no-display
+./.venv/bin/python scripts/mission_demo.py --dry-run --mission failure-demo --no-display
+./.venv/bin/python scripts/mission_demo.py --dry-run --mission required-failure-demo --no-display
+./.venv/bin/python scripts/mission_demo.py --dry-run --mission collision-demo --no-display
+./.venv/bin/python scripts/mission_demo.py --dry-run --mission polaris-demo-mission --no-display
+
+35. MISSION ORCHESTRATION — NO-FLIGHT READINESS (simulator must be running)
+----------------------------------------------------------------------------
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/mission_demo.py --no-flight --mission two-point-demo --no-display
+
+36. MISSION ORCHESTRATION — LIVE MISSIONS (simulator must be running)
+----------------------------------------------------------------------
+# Smallest mission first:
+cd ~/Documents/Polaris
+./.venv/bin/python scripts/mission_demo.py --mission two-point-demo --display
+
+# Active-perception recovery mission:
+./.venv/bin/python scripts/mission_demo.py --mission recovery-demo --display
+
+# Optional waypoint skip mission:
+./.venv/bin/python scripts/mission_demo.py --mission failure-demo --display
+
+# Required waypoint failure / abort mission:
+./.venv/bin/python scripts/mission_demo.py --mission required-failure-demo --display
+
+# Injected collision hard-override mission:
+./.venv/bin/python scripts/mission_demo.py --mission collision-demo --display
+
+# Full Antarctic demonstration mission:
+./.venv/bin/python scripts/mission_demo.py --mission polaris-demo-mission --display
+
+37. MISSION ARTIFACTS
+---------------------
+ls -lt ~/Documents/Polaris/artifacts/mission_runs/
+open ~/Documents/Polaris/artifacts/mission_runs/
+
+38. CHECK PROCESSES AFTER MISSION
+----------------------------------
+pgrep -alf 'gz sim|px4|mavsdk_server|mission_demo|operator_view'
+
+39. CLEAN STOP AFTER MISSION
+-----------------------------
+# Let the mission land and exit first. Then stop the simulator:
+cd ~/Documents/Polaris/PX4-Autopilot
+./scripts/stop_polaris_sim.sh
+pgrep -alf 'gz sim|px4|mavsdk_server|mission_demo|operator_view'

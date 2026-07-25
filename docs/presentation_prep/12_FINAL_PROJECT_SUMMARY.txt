@@ -1,0 +1,194 @@
+PROJECT POLARIS FINAL PROJECT SUMMARY
+=====================================
+
+30-SECOND EXPLANATION
+---------------------
+Project Polaris is a bounded autonomous-drone architecture demonstrated in
+PX4/Gazebo simulation. Mission navigation proposes motion, active perception
+can temporarily own bounded hover/yaw, reactive avoidance rewrites unsafe local
+motion, and a separate Safety Supervisor is the final application gate before
+MAVSDK and PX4. Observation completion requires fresh deterministic geometric,
+health, stability, risk, speed, and dwell evidence. An optional VLM and
+Ego-Context pipeline runs in shadow mode, adding semantic context without any
+authority to command the vehicle or alter safety decisions.
+
+2-MINUTE EXPLANATION
+--------------------
+Polaris addresses a specific integration problem: how to combine autonomous
+mission behavior, perception recovery, obstacle response, semantic scene
+understanding, and evidence collection without creating ambiguous command
+authority.
+
+The integrated runtime owns one MAVSDK system and one lifecycle for telemetry,
+camera input, relative monocular depth, optional VLM inference, collision
+monitoring, display, mission execution, landing, and shutdown. At each control
+tick, the local navigator proposes a bounded motion. Active perception may
+replace that with stationary yaw during recovery or observation dwell. Reactive
+avoidance then uses a coarse 3x3 relative-risk grid to rewrite the proposal.
+SafetySupervisor evaluates connection, freshness, confidence, collision,
+Offboard state, control timing, displacement, and command limits. Only its
+SafeMotion reaches the MAVSDK sender; PX4 remains responsible for flight
+stabilization and command acceptance.
+
+An observation waypoint is not declared complete just because the vehicle
+crosses a coordinate. It must remain within configured stand-off geometry and
+heading limits while visual/depth health, depth stability, centre risk, speed,
+collision state, stable dwell, and fresh depth-frame evidence all pass. The
+implementation prevents repeated 10 Hz reads of one depth inference from
+counting as multiple observations. Completion is accepted only after command
+transmission succeeds and no hard safety override exists.
+
+The VLM path is intentionally separate. A latest-frame worker calls the optional
+Ollama-backed service, typed results are temporally fused and semantically
+validated, and a one-way Ego-Context memory records bounded semantic state and
+events. None of those objects enters SafetySupervisor or PX4 control. This lets
+the project evaluate learned semantics while retaining deterministic safety and
+honest failure behavior.
+
+FULL TECHNICAL EXPLANATION
+--------------------------
+System boundary:
+  Polaris is high-level application autonomy around PX4, not a replacement
+  flight controller. PX4 owns estimation, stabilization, arming, Offboard
+  acceptance, and physical/simulated actuation.
+
+Mission layer:
+  MissionOrchestrator owns phase, waypoint order, retry/skip/replan policy,
+  duration/path/displacement bounds, abort, and result. The current full
+  Antarctic demonstration contains corridor staging, deterministic rock-
+  observation staging, an optional station approach, and surrogate landing-zone
+  staging. It allows one bounded replan and lands at the current position.
+
+Navigation and recovery:
+  LocalGoalNavigator generates ordinary bounded motion and tracks progress.
+  ActivePerceptionManager performs bounded hover/yaw recovery and observation
+  dwell ownership. BoundedMissionReplanner may insert one nearby staging
+  waypoint, but this is heuristic local replanning rather than global planning.
+
+Perception:
+  Camera frames feed visual-health analysis and a latest-frame DepthWorker.
+  Relative pseudo-depth is converted into stability/health and a coarse risk
+  grid. It is not metric ranging. Asynchronous outputs carry source sequences,
+  inference timestamps, and freshness so stale or duplicate evidence can be
+  rejected.
+
+Observation semantics:
+  ObservationTracker has explicit candidate, dwell, completion, invalidation,
+  and timeout behavior. Fresh evidence requires a distinct depth source frame
+  and increasing inference timestamp. The full mission's configured observation
+  window is 2.5 to 3.0 metres from the waypoint coordinate, within 12 degrees,
+  visual health at least 0.35, depth health at least 0.4, depth stability at
+  least 0.75, centre risk at most 0.45, horizontal speed at most 0.2 m/s,
+  stable duration at least 0.6 seconds, and at least three fresh observations.
+  These are deterministic waypoint-relative gates, not object recognition.
+
+Avoidance and safety:
+  ReactiveAvoidanceController can rewrite motion based on local risk and
+  persistence. SafetySupervisor then applies the final gate. Collision, stale
+  required state/perception, invalid data, critical modes, lost expected
+  Offboard state, excessive control gap, and displacement violations fail
+  closed. Temporal emergency confirmation is restricted to recognized active-
+  perception ownership with exactly zero translation; ordinary translational
+  emergency risk aborts immediately, and confirmation timeout also aborts.
+
+Semantic shadow path:
+  With --vlm, VLMService and VLMWorker produce typed observations. SemanticFusion
+  rejects stale/duplicate evidence and forms a bounded fused scene. Semantic
+  validation compares this scene with deterministic outcomes and expected
+  target metadata. EgoContextCoordinator projects post-decision runtime state
+  into immutable EgoContextMemory snapshots and bounded events. The path is
+  observer-only and cannot complete, command, or rescue the mission.
+
+Evidence and shutdown:
+  Sampled JSON artifacts retain mission configuration, states, waypoint results,
+  transitions, observation events, bounded replans, collision evidence mode,
+  timing, path proxy, landing, disarm, and final result. Cancellation and runtime
+  exceptions enter controlled hover/land cleanup before worker and MAVSDK
+  shutdown. Artifacts omit raw imagery and transient semantic context, so replay
+  is informative but not full sensor reconstruction or independent ground truth.
+
+VERIFIED RETAINED RESULTS
+-------------------------
+Successful simulator mission:
+  artifacts/mission_runs/20260724T205546Z_mission.json
+
+  Result                         COMPLETED
+  Mission elapsed                106.3 s
+  Completed waypoints            4 of 4
+  Recovery count                 1
+  Avoidance count                4
+  Collision count                0 recorded
+  Landing/disarm                 CONFIRMED / CONFIRMED
+  Path-length proxy              16.399923261220078 m
+  Displacement                   11.554798680110588 m
+  Maximum measured speed         0.3683382883106002 m/s
+  Maximum command                0.35000000000000003 m/s
+  Loop deadline misses           3
+
+  Rock-observation completion:
+  configured-waypoint distance   2.932854419806033 m
+  heading error                 -3.8613378731212435 deg
+  visual/depth health            0.8370954156474011 / 1.0
+  depth stability                0.9803635478019714
+  centre risk                    0.16290020942687988
+  horizontal speed               0.06150241247377665 m/s
+  dwell                          0.6730423340050038 s
+  fresh observations             3
+
+Bounded failure simulator mission:
+  artifacts/mission_runs/20260725T082730Z_mission.json
+
+  The retained execution starts at rock-observation, times out, accepts one
+  HEALTHIER_VIEWPOINT generated staging waypoint, times out again, aborts, and
+  records confirmed landing/disarm with zero recorded collisions. It supports
+  timeout/replan/abort/terminal-path claims, not full-mission success.
+
+Grounded readiness:
+  artifacts/mission_runs/20260725T082547Z_mission.json
+
+  Result is NO_FLIGHT_COMPLETED with autonomy disabled, command_transmitted
+  false, zero path/displacement/command, and no landing required. It supports
+  grounded readiness evaluation, not airborne mission completion.
+
+TEST EVIDENCE
+-------------
+Current recorded complete unit-test result: 285 passed.
+Current recorded VLM service/worker/fusion/validation count: 44 passed.
+Current recorded fusion plus semantic-validation count: 26 passed.
+
+Tests establish implemented behavior under their fixtures. They do not replace
+repeated simulator trials, hardware-in-the-loop validation, or field testing.
+
+WHAT IS NOVEL OR VALUABLE HERE
+------------------------------
+The project's strongest contribution is not a claim that a VLM can fly a drone.
+It is the explicit architecture for preventing that ambiguity:
+
+  deterministic bounded autonomy
+              |
+              v
+  one final safety-command boundary
+              |
+              v
+  PX4 flight control
+
+  optional learned semantics
+              |
+              v
+  typed fusion + validation + bounded memory
+              |
+              v
+  observation and evaluation only
+
+That separation enables useful semantic experimentation while preserving
+traceable commands, fresh-evidence completion, fail-closed perception handling,
+controlled landing, and honest replayable evidence.
+
+FINAL CLAIM
+-----------
+Project Polaris demonstrates, in simulation, that bounded mission autonomy,
+active-perception recovery, deterministic observation semantics, reactive
+avoidance, final safety supervision, and optional VLM-derived semantic context
+can be integrated with explicit ownership and no hidden semantic control path.
+The retained evidence supports that implementation claim, while the documented
+limitations define the work still required for reliable real-world deployment.

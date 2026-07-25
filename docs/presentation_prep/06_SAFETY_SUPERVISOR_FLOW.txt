@@ -1,0 +1,255 @@
+PROJECT POLARIS SAFETY SUPERVISOR FLOW
+======================================
+
+FINAL APPLICATION-SIDE AUTHORITY
+--------------------------------
+SafetySupervisor in src/polaris/control/safety_supervisor.py is the final
+application-side gate before MAVSDK transmission. Upstream components can
+propose motion, but only SafeMotion is sent.
+
+PRIORITY AND OWNERSHIP
+----------------------
+
+  MissionOrchestrator
+        selects bounded objective/policy
+              |
+              v
+  LocalGoalNavigator
+        ordinary DesiredMotion
+              |
+              +<-- ActivePerceptionManager
+              |    conditional yaw/hover ownership
+              v
+  ReactiveAvoidanceController
+        reactive proposed command
+              |
+              v
+  SafetySupervisor
+        FINAL application command gate
+              |
+              v
+  SafeMotion -> MAVSDK Offboard -> PX4 stabilization
+
+Safety priority is higher than mission, navigation, active perception, and
+reactive avoidance. PX4 remains the physical/simulated flight authority.
+
+DECISION FLOW
+-------------
+
+ candidate command + NavigationState + ConfidenceReport + CollisionState
+                              |
+                              v
+                 +---------------------------+
+                 | immediate hard condition? |
+                 +-------------+-------------+
+                               |
+                    yes        |        no
+                 +-------------+-------------+
+                 v                           v
+       +-------------------+      +--------------------------+
+       | hard ABORT hover  |      | emergency centre risk?   |
+       | zero translation  |      +------------+-------------+
+       | zero yaw          |                   |
+       | recommend LAND    |         no        |       yes
+       +---------+---------+      +------------+-------------+
+                 |                v                          v
+                 |       confidence/mode clamps    active-perception-owned,
+                 |       speed/bounds validation   zero translation request?
+                 |                |                    |          |
+                 |                v                   no         yes
+                 |          SafeMotion           immediate   CLEAR -> SUSPECTED
+                 |                |               CONFIRMED         |
+                 |                |                   |             v
+                 |                |                   |      fresh frame evidence
+                 |                |                   |       or 0.8 s timeout
+                 |                |                   |             |
+                 |                |                   |             v
+                 |                |                   +------> CONFIRMED
+                 |                |                                 |
+                 +----------------+---------------------------------+
+                                  v
+                          mission hard failure
+                                  |
+                                  v
+                   RETURN_OR_LAND -> hover -> land
+                                  |
+                                  v
+                         landed -> disarmed
+
+IMMEDIATE HARD CONDITIONS
+-------------------------
+Always checked:
+
+  PX4 disconnected
+  invalid risk grid
+  non-finite requested or proposed command
+
+Checked while armed or airborne:
+
+  collision detected
+  local position unavailable or stale
+  camera unavailable or stale
+  RGB age above 1200 ms
+  required depth unavailable or stale
+  depth inference age above 1200 ms
+  depth condition CRITICAL
+  Confidence Engine mode EMERGENCY
+  state age above 1000 ms
+  expected OFFBOARD mode lost
+  supervisor/control-loop gap above 0.5 s
+  displacement above 14.0 m
+
+The hard result is a zero-motion SafeMotion with SupervisorMode.ABORT,
+hard_override=true, and recommended_action=LAND.
+
+STALE PERCEPTION IS IMMEDIATE
+-----------------------------
+Stale RGB or required depth does not enter temporal emergency confirmation.
+It is an immediate hard condition while armed/airborne. This is fail-closed:
+Polaris does not continue translating while required perception is unknown.
+
+Visual staleness has two paths:
+
+  VisualHealthAnalyzer stale after 500 ms
+  SafetySupervisor RGB limit 1200 ms and camera stale check
+  ConfidenceEngine can also become EMERGENCY
+
+Depth staleness:
+
+  DepthState stale after 1200 ms
+  integrated flight forces depth_required_for_motion=true
+  supervisor and ConfidenceEngine independently reject stale required depth
+
+COLLISION BYPASSES TEMPORAL CONFIRMATION
+----------------------------------------
+CollisionMonitor publishes a latched CollisionState. Unexpected or injected
+contact while armed/airborne causes immediate hard abort. It does not require
+two depth frames, low variance, or neighbour agreement.
+
+Expected ground contact is classified only when all are true:
+
+  entity contains snow_ground::
+  ground contact is currently allowed
+  absolute down velocity <= 1.0 m/s
+  penetration depth exists and <= 0.01 m
+
+Expected contacts are counted but do not latch collision_detected. Injected
+collision tests are explicitly labelled and do not claim physical impact.
+
+TEMPORAL EMERGENCY CONFIRMATION
+-------------------------------
+Configured values from config/reactive_avoidance.json:
+
+  emergency threshold              centre risk >= 0.90
+  required frames                  2
+  confirmation timeout             0.8 s
+  maximum variance                 0.0016
+
+Ordinary translational motion:
+  Emergency centre risk confirms immediately and hard-aborts. The temporal
+  two-frame process does not delay ordinary-motion emergency response.
+
+Active-perception-owned zero translation:
+  Temporal confirmation is allowed only when the requested command has a
+  recognized active-perception source and forward/right/down are exactly zero.
+  During SUSPECTED, translation remains zero and bounded active-perception yaw
+  may continue.
+
+Fresh confirmation evidence requires:
+
+  nonzero depth frame sequence different from the previous confirmation frame
+  strictly newer inference timestamp
+
+Confirmation occurs when:
+
+  two collected risks have variance <= 0.0016
+  OR suspicion age reaches 0.8 s
+
+The timeout is fail-closed. It confirms even if too few fresh frames arrive or
+variance remains excessive. Neighbour agreement is diagnostic, not a required
+confirmation condition.
+
+Confirmation resets when risk clears, ownership ends, sequence restarts,
+autonomy is disabled, landing starts, or another immediate hard condition
+occurs.
+
+NON-HARD CONSTRAINTS
+--------------------
+  autonomy disabled
+      -> hover without hard override
+
+  Confidence CAUTIOUS or DEGRADED
+      -> forward magnitude <= 0.16 m/s
+      -> lateral magnitude <= 0.25 m/s
+
+  final command clamps
+      horizontal <= 0.60 m/s
+      vertical <= 0.18 m/s magnitude
+      yaw rate <= 15 deg/s magnitude
+
+  measured horizontal speed > 0.90 m/s
+      -> non-hard hover
+
+ACTIVE-PERCEPTION ZERO-TRANSLATION CONDITION
+--------------------------------------------
+Observation dwell and recovery can preserve bounded yaw through some degraded
+perception conditions. This exception does not permit translation and does not
+bypass collision, stale state, critical temporal instability, or critical
+depth. SafetySupervisor verifies the original request source and exactly zero
+translation before applying temporal emergency confirmation.
+
+SAFETY HOLD, HARD ABORT, AND LANDING
+------------------------------------
+Safety hold:
+  Non-hard hover with motion zeroed. Mission may continue if the condition
+  clears and no bounded failure is reached.
+
+Hard abort:
+  SafeMotion is zero, hard_override is true, mission treats the waypoint as a
+  hard failure, and the orchestrator aborts.
+
+Controlled landing:
+  Terminal handling performs a 2.0 s final hover, stops Offboard, sends land,
+  waits for fresh landed telemetry, attempts disarm, then waits for fresh
+  unarmed telemetry.
+
+Landing timeouts:
+  up to 45 s for landed telemetry
+  up to 5 s for disarmed telemetry
+
+Landing outcomes:
+  CONFIRMED
+  TIMEOUT
+  COMMAND_FAILED: <reason>
+  NOT_REQUIRED when never armed/on ground
+
+CTRL+C AND RUNTIME SHUTDOWN
+---------------------------
+Ctrl+C becomes an operator interruption abort. The landing task is shielded
+from cancellation. The MAVSDK server runs in a separate process session until
+landing cleanup completes. After the vehicle application exits:
+
+  display closes
+  collision monitor closes
+  visual task is cancelled
+  VLM and depth workers join
+  camera unsubscribes
+  telemetry and connection tasks stop
+  OwnedMavsdkSystem terminates its server
+
+SEMANTIC DATA IS NOT SAFETY INPUT
+---------------------------------
+VLMResult, FusedSceneContext, semantic-validation classification, and
+EgoContextMemory are absent from SafetySupervisor.evaluate(). They cannot
+clear, delay, or create an emergency, collision response, SafeMotion, or land
+recommendation.
+
+KEY PRESENTATION STATEMENTS
+---------------------------
+- Collision and stale required perception are immediate.
+- Temporal emergency confirmation is scoped to active-perception-owned,
+  zero-translation yaw.
+- Timeout confirms rather than clears uncertainty.
+- Only SafetySupervisor output is sent by the application.
+- PX4 remains responsible for stabilization and command acceptance.
+- Semantic observers never enter this safety decision flow.

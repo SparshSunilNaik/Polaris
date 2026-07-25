@@ -1,0 +1,315 @@
+PROJECT POLARIS VLM AND SEMANTIC FUSION PIPELINE
+================================================
+
+PIPELINE
+--------
+
+ existing Gazebo RGB CameraFrame
+              |
+              | reused from the single GazeboCameraSubscriber
+              v
+ +-------------------------------+
+ | VLMWorker                     |
+ | one active inference          |
+ | one replaceable pending frame |
+ | JPEG quality 85               |
+ +---------------+---------------+
+                 |
+                 v
+ +-------------------------------+
+ | VLMService                    |
+ | strict JSON request/response  |
+ | timeout, retry, cache, lock    |
+ +---------------+---------------+
+                 | HTTP
+                 v
+ +-------------------------------+
+ | Ollama                        |
+ | http://localhost:11434        |
+ | qwen2.5vl:7b                  |
+ +---------------+---------------+
+                 |
+                 v
+ +-------------------------------+
+ | immutable VLMResult           |
+ | terrain, landmarks, target,   |
+ | confidence, texture, summary  |
+ +---------------+---------------+
+                 |
+                 v
+ +-------------------------------+
+ | immutable VLMSceneState       |
+ | status, model, frame/timing    |
+ +---------------+---------------+
+                 |
+                 v
+ +-------------------------------+
+ | EgoContextCoordinator         |
+ | synchronous SemanticFusion    |
+ +---------------+---------------+
+                 |
+                 v
+ +-------------------------------+
+ | immutable FusedSceneContext   |
+ | bounded temporal belief       |
+ +---------------+---------------+
+                 |
+          deterministic observation outcome
+                 |          |
+                 +----------+
+                 v
+ +-------------------------------+
+ | SemanticObservationValidator  |
+ | SHADOW ONLY                   |
+ +---------------+---------------+
+                 |
+                 v
+ EgoContextMemory + Operator View + stdout report
+
+There is no output arrow from this pipeline to MissionOrchestrator,
+ObservationTracker, LocalGoalNavigator, ReactiveAvoidanceController,
+SafetySupervisor, MAVSDK, or PX4.
+
+CURRENT CHECKED-IN RUNTIME DEFAULTS
+-----------------------------------
+Source: config/vlm.json unless noted.
+
+Enablement
+  Disabled by default. The mission requires --vlm to construct VLMService and
+  VLMWorker. --no-vlm is the explicit off flag.
+
+Endpoint and model
+  endpoint                         http://localhost:11434
+  model                            qwen2.5vl:7b
+
+Inference behavior
+  inference_timeout_s              15.0
+  health_timeout_s                 2.0
+  maximum_retries                  0 in checked-in runtime config
+  retry_delay_s                    0.25, unused when retries are zero
+  inference_interval_s             4.0
+  result_stale_after_s             12.0
+  cache_capacity                   8
+  cache_ttl_s                      5.0
+  ollama_num_gpu                   0 for normal mission requests
+
+No-flight behavior
+  scripts/mission_demo.py removes the num_gpu override for --no-flight, so
+  Ollama chooses its default execution device while the vehicle remains
+  grounded. The no-flight semantic-accumulation wait is bounded to 20-45 s.
+
+Dataclass VLMConfig defaults differ from checked-in runtime config:
+  default inference timeout        60.0 s
+  default maximum retries          1
+  default ollama_num_gpu           None
+
+Always distinguish code defaults from config/vlm.json when presenting.
+
+Fusion behavior
+  fusion_window_size               5 observations
+  maximum_observation_age_s        20.0
+  minimum_evidence_count           3
+  target_confirmation_threshold   3 positive observations
+  target_rejection_threshold      3 negative observations
+  minimum_accepted_confidence      0.5
+  fusion_landmark_support_count    2 observations
+
+VLM SERVICE
+-----------
+VLMService is implemented in src/polaris/vlm/service.py.
+
+Health and model verification
+  GET /api/tags
+  is_available() is true only when Ollama is reachable and the configured
+  model name is present.
+
+Inference
+  POST /api/chat
+  stream=false
+  temperature=0
+  seed=0
+  image bytes are base64 encoded in the user message
+  the full JSON schema is supplied in the format field
+
+The system prompt forbids conversation, explanation, Markdown, and extra keys.
+The parser requires exactly:
+
+  terrain_type
+  visible_landmarks
+  target_visible
+  scene_confidence
+  texture_quality
+  scene_summary
+
+The immutable VLMResult validates non-empty labels and bounds confidence and
+texture to [0,1]. Additional, missing, wrongly typed, or invalid fields are
+rejected. Callers never receive raw free-form model output.
+
+Graceful result statuses
+  PENDING
+  SUCCESS
+  UNAVAILABLE
+  MODEL_UNAVAILABLE
+  TIMEOUT
+  INVALID_RESPONSE
+  STALE
+
+Service failures become typed degraded results. They do not raise into the
+mission control loop. A degraded result has UNKNOWN terrain, no landmarks,
+target false, zero confidence/texture, and an unavailable summary.
+
+Retry policy
+  VLMService can retry OSError, TimeoutError, HTTP 429, and HTTP 5xx according
+  to VLMConfig. It does not retry terminal non-429 4xx errors. The current
+  mission config sets maximum_retries to zero to avoid repeated runtime load.
+
+Cache and thread safety
+  Successful results use an SHA-256 image key in an OrderedDict with LRU-like
+  ordering. Capacity is 8 and TTL is 5 s. An RLock serializes cache and HTTP
+  access.
+
+VLM WORKER AND QUEUE
+--------------------
+VLMWorker is one optional daemon thread named polaris-vlm.
+
+  active request: at most one
+  pending queue: exactly one replaceable frame
+  new pending frame: replaces the older unprocessed frame
+  active inference: never interrupted
+  next request: newest retained frame
+
+The worker interval limits inference start times. It does not create another
+camera subscriber or polling task. EgoStateCoordinator submits a frame only
+when it observes a new camera sequence and VLM observation is enabled.
+
+Publication is successful only when the result is SUCCESS and source-frame age
+at completion is within 12 s. Read-time freshness also expires a successful
+state 12 s after inference completion. Stale state carries no semantic result.
+
+SEMANTIC FUSION ACCEPTANCE
+--------------------------
+SemanticFusion is synchronous; it owns no worker, thread, task, subscriber, or
+model request. It runs inside EgoContextCoordinator.project().
+
+An observation enters the window only if:
+
+  state exists
+  status is SUCCESS
+  result exists
+  scene_confidence >= 0.5
+  source timestamp is at or after mission epoch
+  source age <= 20 s
+  frame sequence is strictly newer than the newest accepted sequence
+  source timestamp does not regress
+
+The component evicts by both age and capacity. Duplicate sequences,
+out-of-order results, stale evidence, pre-mission results, unavailable results,
+timeouts, invalid responses, and low-confidence results never vote.
+
+FUSION ALGORITHM
+----------------
+Terrain
+  Normalize case, punctuation/underscore, and whitespace. Sum observation
+  confidence by normalized label. Winner uses greatest total confidence,
+  then greatest count, then normalized-key ordering.
+
+Landmarks
+  Normalize exactly as terrain. Duplicate normalized labels in one observation
+  count once. Publish a landmark only after support from at least two accepted
+  observations. No fuzzy, substring, embedding, or summary matching occurs.
+
+Target visibility
+  Count positive and negative target_visible values.
+
+  evidence count < 3       -> INSUFFICIENT_EVIDENCE, target unknown
+  any mixed evidence       -> CONFLICTED, target unknown
+  at least 3 positive      -> STABLE, target true
+  at least 3 negative      -> STABLE, target false
+  otherwise                -> INSUFFICIENT_EVIDENCE
+
+The implementation is deliberately more conservative than simple majority
+voting: any positive/negative contradiction at sufficient evidence becomes
+CONFLICTED.
+
+Texture quality
+  Confidence-weighted arithmetic mean.
+
+Fused confidence
+  minimum accepted observation confidence
+  multiplied by the smaller of terrain support and target agreement support.
+
+Scene summary
+  No new language is generated. Use the newest source summary supporting the
+  fused terrain and, when resolved, target value.
+
+FusedSceneContext statuses
+  INSUFFICIENT_EVIDENCE
+  STABLE
+  CONFLICTED
+  STALE
+
+FusedSceneContext fields
+  status, terrain_type, visible_landmarks, target_visible or unknown,
+  texture_quality, fused_confidence, evidence_count, positive/negative counts,
+  source_frame_range, first/last source timestamps, scene_summary, rationale.
+
+MISSION RESET AND EVENT SUPPRESSION
+-----------------------------------
+Fusion resets on EgoContextCoordinator.start_mission(). The mission timestamp
+becomes an epoch, rejecting a result generated from a pre-mission frame.
+
+Fused semantic events are emitted only on meaningful signatures containing:
+
+  fused status
+  normalized terrain
+  normalized repeated landmarks
+  target belief
+
+Evidence-count, confidence, texture, timestamp, rationale, and summary-only
+changes do not generate events. Event kinds are:
+
+  FUSED_SCENE_STABLE
+  FUSED_SCENE_CONFLICTED
+  FUSED_SCENE_STALE
+
+SHADOW SEMANTIC VALIDATION
+--------------------------
+For an already completed or failed OBSERVATION waypoint:
+
+  1. Prefer a fresh STABLE fused result.
+  2. If fusion is INSUFFICIENT_EVIDENCE, fall back to the latest fresh
+     single-frame result.
+  3. Treat CONFLICTED fusion as no conclusive evidence.
+  4. Treat STALE fusion as stale evidence.
+
+The record identifies evidence_source as FUSED or SINGLE_FRAME and classifies:
+
+  AGREEMENT, DISAGREEMENT, NO_EVIDENCE, LOW_CONFIDENCE,
+  STALE_EVIDENCE, TARGET_UNSPECIFIED
+
+Expected labels come from waypoint metadata. Positive target evidence requires
+target_visible=true and exact normalized landmark equality. scene_summary is
+not a target matcher.
+
+ZERO CONTROL AUTHORITY
+----------------------
+Structural evidence:
+
+  src/polaris/vlm contains no MAVSDK, Offboard, command, or actuator calls.
+  SemanticFusion returns only an immutable FusedSceneContext.
+  Semantic validation runs after deterministic outcome edges exist.
+  EgoContextCoordinator has no send method.
+  NavigationState contains no VLM field consumed by controllers.
+  MissionDemo transmits SafeMotion before semantic projection.
+
+Unit tests explicitly verify unchanged requested motion, ownership, waypoint
+outcomes, and absence of command APIs.
+
+LIVE-EVIDENCE QUALIFICATION
+---------------------------
+The latest no-flight artifact is
+artifacts/mission_runs/20260725T082547Z_mission.json. It verifies a 40.857566 s
+NO_FLIGHT_COMPLETED run with no transmitted motion command, no collision, and
+no landing required. Artifact schema version 1 does not retain VLM/fusion
+fields or invocation flags, so it cannot independently prove a particular
+semantic result. Runtime semantic JSON was printed to stdout but not persisted.

@@ -1,0 +1,24 @@
+{
+  "preflight_timeout_s": 90.0,
+  "takeoff_altitude_m": 2.5,
+  "waypoint_verification_duration_s": 1.0,
+  "maximum_mission_duration_s": 150.0,
+  "maximum_mission_path_length_m": 18.0,
+  "maximum_waypoint_attempts": 2,
+  "maximum_replans": 1,
+  "maximum_generated_waypoint_offset_m": 2.0,
+  "generated_waypoint_timeout_s": 20.0,
+  "lateral_replan_offset_m": 1.5,
+  "pause_between_waypoints_s": 1.0,
+  "return_or_land_policy": "LAND_AT_CURRENT_POSITION",
+  "automatic_landing": true,
+  "artifact_sampling_hz": 5.0,
+  "world_bounds": {
+    "north_min_m": -18.0,
+    "north_max_m": 18.0,
+    "east_min_m": -8.0,
+    "east_max_m": 13.0,
+    "down_offset_min_m": -0.5,
+    "down_offset_max_m": 0.5
+  }
+}

@@ -1,0 +1,154 @@
+PROJECT POLARIS PRESENTATION PREPARATION PACKAGE
+================================================
+
+PURPOSE
+-------
+This directory is a presentation and technical-defense guide for the current
+Project Polaris implementation. It is based on the source, checked-in JSON
+configuration, current unit tests, retained mission artifacts, and documented
+runtime commands under ~/Documents/Polaris.
+
+The files are plain text so diagrams and command blocks render predictably in
+a monospaced terminal. They do not replace the source code or mission
+artifacts. Where retained artifacts cannot confirm a transient VLM result,
+that limitation is stated explicitly.
+
+FILE GUIDE
+----------
+00_INDEX.txt
+  This map. It explains what each document is for and how to use the package.
+
+01_COMPLETE_SYSTEM_ARCHITECTURE.txt
+  The complete system diagram. It separates deterministic flight control,
+  perception, semantic observation, safety, and observability. Use this first
+  when explaining how all subsystems fit together.
+
+02_RUNTIME_CONTROL_LOOP.txt
+  Construction, ownership, one-tick execution order, command transmission,
+  and shutdown. Use this to answer concurrency and authority questions.
+
+03_EGO_CONTEXT_MEMORY_ARCHITECTURE.txt
+  The semantic working-memory model, immutable snapshots, bounded events,
+  edge detection, reset, and separation from durable artifacts.
+
+04_VLM_AND_SEMANTIC_FUSION_PIPELINE.txt
+  Ollama/Qwen integration, latest-frame worker, strict typed output, temporal
+  fusion, shadow validation, degradation, and zero control authority.
+
+05_OBSERVATION_SEMANTICS_STATE_MACHINE.txt
+  The deterministic observation state machine, exact rock-observation gates,
+  timeout behavior, positional fallback, replanning, and semantic annotation.
+
+06_SAFETY_SUPERVISOR_FLOW.txt
+  Final command gating, immediate failures, temporal emergency confirmation,
+  collision handling, landing, disarm, cancellation, and ownership priority.
+
+07_DEMO_EXECUTION_PLAN.txt
+  Presentation-ready terminal layout, core and optional VLM demo tracks,
+  commands, readiness, audience cues, clean stop, fallbacks, and speaking
+  script.
+
+08_CODE_WALKTHROUGH_GUIDE.txt
+  File-by-file guide in the order to open code for a professor. It lists real
+  symbols, inputs, outputs, invariants, and high-value code regions.
+
+09_DESIGN_DECISIONS_AND_JUSTIFICATIONS.txt
+  Problem/choice/alternatives/trade-offs for major architecture decisions.
+
+10_LIMITATIONS_AND_FUTURE_WORK.txt
+  Honest limitations and future work separated into engineering, research,
+  and real-world deployment requirements.
+
+11_PROFESSOR_QUESTIONS_AND_ANSWERS.txt
+  More than 40 concise technical and adversarial questions with grounded
+  answers that avoid overstating results.
+
+12_FINAL_PROJECT_SUMMARY.txt
+  A polished 30-second, 2-minute, and full technical explanation, followed by
+  verified results and the final contribution.
+
+RECOMMENDED READING ORDER
+-------------------------
+1. 12_FINAL_PROJECT_SUMMARY.txt
+2. 01_COMPLETE_SYSTEM_ARCHITECTURE.txt
+3. 02_RUNTIME_CONTROL_LOOP.txt
+4. 05_OBSERVATION_SEMANTICS_STATE_MACHINE.txt
+5. 06_SAFETY_SUPERVISOR_FLOW.txt
+6. 03_EGO_CONTEXT_MEMORY_ARCHITECTURE.txt
+7. 04_VLM_AND_SEMANTIC_FUSION_PIPELINE.txt
+8. 09_DESIGN_DECISIONS_AND_JUSTIFICATIONS.txt
+9. 10_LIMITATIONS_AND_FUTURE_WORK.txt
+10. 08_CODE_WALKTHROUGH_GUIDE.txt
+11. 07_DEMO_EXECUTION_PLAN.txt
+12. 11_PROFESSOR_QUESTIONS_AND_ANSWERS.txt
+
+RECOMMENDED PRESENTATION ORDER
+------------------------------
+1. Problem and 30-second summary from 12_FINAL_PROJECT_SUMMARY.txt.
+2. Whole-system diagram from 01_COMPLETE_SYSTEM_ARCHITECTURE.txt.
+3. Deterministic control tick from 02_RUNTIME_CONTROL_LOOP.txt.
+4. Observation state machine from 05_OBSERVATION_SEMANTICS_STATE_MACHINE.txt.
+5. Safety priority from 06_SAFETY_SUPERVISOR_FLOW.txt.
+6. Core live demo from 07_DEMO_EXECUTION_PLAN.txt.
+7. Ego-Context and semantic observer from files 03 and 04.
+8. Verified results, limitations, and contribution from files 10 and 12.
+9. Code walkthrough only if requested.
+
+USE BEFORE THE DEMO
+-------------------
+07_DEMO_EXECUTION_PLAN.txt
+  Primary checklist for environment, terminal order, readiness, commands,
+  fallback artifacts, and cleanup.
+
+12_FINAL_PROJECT_SUMMARY.txt
+  Rehearse the short explanations and verified-result wording.
+
+01_COMPLETE_SYSTEM_ARCHITECTURE.txt
+  Rehearse ownership boundaries so the live display can be narrated clearly.
+
+06_SAFETY_SUPERVISOR_FLOW.txt
+  Review expected abort/landing behavior before demonstrating failures.
+
+10_LIMITATIONS_AND_FUTURE_WORK.txt
+  Prepare honest language if the live run differs from a successful artifact.
+
+USE DURING TECHNICAL QUESTIONING
+--------------------------------
+02_RUNTIME_CONTROL_LOOP.txt
+  For threading, task count, ordering, and command authority.
+
+05_OBSERVATION_SEMANTICS_STATE_MACHINE.txt
+  For exact completion criteria and why no-progress is not success.
+
+06_SAFETY_SUPERVISOR_FLOW.txt
+  For immediate versus temporally confirmed hazards.
+
+03_EGO_CONTEXT_MEMORY_ARCHITECTURE.txt
+  For semantic state, immutability, reset, and why memory is not a controller.
+
+04_VLM_AND_SEMANTIC_FUSION_PIPELINE.txt
+  For hallucination, latency, confidence, fusion, and shadow-mode questions.
+
+08_CODE_WALKTHROUGH_GUIDE.txt
+  For rapidly opening the implementation that supports an answer.
+
+09_DESIGN_DECISIONS_AND_JUSTIFICATIONS.txt
+  For defending technology choices and trade-offs.
+
+11_PROFESSOR_QUESTIONS_AND_ANSWERS.txt
+  For rehearsing likely and adversarial questions.
+
+EVIDENCE RULES USED IN THIS PACKAGE
+-----------------------------------
+- Current complete unit-test result: 285 tests passed.
+- Current VLM service/worker/fusion/validation focused count: 44 tests.
+- Current fusion plus semantic-validation count: 26 tests.
+- Retained successful full mission evidence:
+  artifacts/mission_runs/20260724T205546Z_mission.json
+- Latest retained full mission evidence:
+  artifacts/mission_runs/20260725T082730Z_mission.json
+- Latest retained no-flight evidence:
+  artifacts/mission_runs/20260725T082547Z_mission.json
+- Mission artifacts do not persist Ego-Context, VLM, fusion, semantic
+  validation, or invocation flags. Exact live semantic stdout from prior runs
+  cannot be independently reconstructed from retained artifacts.

@@ -1,0 +1,144 @@
+PROJECT POLARIS LIMITATIONS AND FUTURE WORK
+===========================================
+
+CURRENT CLAIM BOUNDARY
+----------------------
+Polaris currently demonstrates a safety-layered, bounded, single-vehicle
+autonomy architecture in PX4/Gazebo simulation. It does not demonstrate
+production airworthiness, physical Antarctic operation, or statistical field
+reliability.
+
+ENGINEERING LIMITATIONS
+-----------------------
+1. Python asyncio is not hard real-time. The runtime measures loop elapsed time
+   and deadline misses, but provides no real-time scheduling guarantee.
+
+2. The integrated architecture assumes one vehicle, one RGB camera, one MAVSDK
+   owner, and one mission process.
+
+3. Navigation state is assembled from asynchronous telemetry and perception.
+   The control loop snapshots it, but there is no formal lock-step estimator or
+   timestamp-synchronized multi-sensor fusion backend.
+
+4. VLM requires optional Ollama/model infrastructure, is disabled by default,
+   serializes inference, and can drop superseded pending frames.
+
+5. Artifacts retain compressed sampled records rather than raw RGB, dense depth,
+   synchronized PX4 ULog, Gazebo logs, invocation flags, or signed provenance.
+
+6. The application-generated JSON has no cryptographic signature or independent
+   ground-truth source.
+
+7. No-flight mode validates grounded perception and decision construction, not
+   airborne command behavior.
+
+RESEARCH LIMITATIONS
+--------------------
+1. Depth Anything produces relative pseudo-depth. It is not calibrated obstacle
+   distance or target range.
+
+2. Reactive avoidance consumes a coarse 3x3 risk representation, not a metric
+   occupancy map or globally optimized trajectory.
+
+3. Viewpoint scoring, confidence thresholds, recovery triggers, fusion ages,
+   and mission gates are configured heuristics rather than learned or formally
+   optimized policies.
+
+4. Active perception is bounded hover/yaw. It cannot perform translational
+   next-best-view exploration.
+
+5. Bounded replanning inserts a nearby staging waypoint. It is not global route
+   search and does not prove collision-free reachability.
+
+6. Semantic fusion uses fixed windows and evidence rules rather than calibrated
+   probabilistic belief. Mixed positive and negative target evidence can become
+   conflicted, but confidence is not a field-calibrated probability.
+
+7. Semantic outputs intentionally have zero control authority. This is a safety
+   strength for evaluation, but means semantics cannot yet adapt the mission.
+
+8. Observation completion verifies deterministic conditions near a configured
+   waypoint. It does not itself prove that the expected physical object exists.
+
+9. One retained success and one retained abort do not establish a reliability
+   rate, generalization, or robustness distribution.
+
+SIMULATION LIMITATIONS
+----------------------
+1. CollisionMonitor consumes Gazebo contact data; there is no corresponding
+   hardware collision-sensor adapter in the current architecture.
+
+2. Controlled collision injection is labelled test evidence. It must not be
+   presented as a native physical impact.
+
+3. The Antarctic world is a bounded simulator environment, not a photorealistic
+   or scientifically calibrated replica of field terrain, lighting, wind, and
+   sensor degradation.
+
+4. Collision count zero means no collision was recorded by the application
+   monitor. It is not independent certification of clearance.
+
+5. Landing confirmation comes from application telemetry, not external motion
+   capture or independent ground truth.
+
+6. The full mission's landing-zone target is explicitly surrogate staging
+   before an unvalidated gate. A completed mission does not prove gate traversal
+   or landing on the depicted pad.
+
+7. The path-length metric sums sampled horizontal NED motion. It is a proxy, not
+   exact three-dimensional distance traveled.
+
+FUTURE ENGINEERING WORK
+-----------------------
+- Persist invocation metadata, Ego-Context, fused semantic evidence, semantic
+  validation, and exact software/configuration revisions in artifacts.
+- Add synchronized RGB/depth/ULog references and artifact integrity hashes.
+- Separate hard timing and command enforcement into a real-time-capable process
+  or lower-level implementation with measured end-to-end deadlines.
+- Add explicit process health supervision and fault injection across worker,
+  transport, storage, and shutdown boundaries.
+- Support multiple calibrated cameras and explicit multi-vehicle command
+  ownership without weakening the single-final-gate invariant.
+
+FUTURE RESEARCH WORK
+--------------------
+- Fuse calibrated stereo or LiDAR with monocular cues for metric risk and
+  uncertainty-aware occupancy mapping.
+- Add global collision-aware planning and local trajectory validation.
+- Evaluate translational next-best-view planning with explicit reachability,
+  energy, and collision constraints.
+- Calibrate semantic fusion on a labelled scene dataset and report precision,
+  recall, latency, calibration error, and conflict behavior.
+- Define a narrow semantic-to-mission interface only after independent safety
+  constraints can bound and veto every semantic proposal.
+- Run repeated randomized trials and publish success, abort, collision, timing,
+  recovery, and observation-completion distributions.
+
+REAL-WORLD DEPLOYMENT REQUIREMENTS
+----------------------------------
+- Hardware-in-the-loop testing followed by restrained indoor and outdoor flight
+  campaigns with independent emergency authority.
+- Sensor calibration, environmental qualification, thermal/power analysis, and
+  degraded-light, snow, glare, wind, and communication-loss testing.
+- Geofencing, regulatory compliance, operational risk assessment, documented
+  preflight/abort procedures, and human factors evaluation.
+- Independent safety review of command limits, estimator failure modes, landing,
+  disarm, lost-link handling, and any future semantic authority.
+- Redundant localization and obstacle sensing appropriate to the deployment
+  environment; monocular pseudo-depth alone is insufficient.
+
+HONEST PRESENTATION LANGUAGE
+----------------------------
+Say:
+  "The retained simulator artifact records deterministic observation completion
+  and a confirmed landing under the implemented application checks."
+
+Do not say:
+  "The drone proved autonomous Antarctic rock recognition and safe field
+  deployment."
+
+Say:
+  "The semantic path is integrated in observer-only shadow mode."
+
+Do not say:
+  "The VLM controls navigation" or "the artifact proves the VLM saw a rock."

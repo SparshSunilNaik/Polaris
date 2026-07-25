@@ -1,0 +1,39 @@
+{
+  "mission_id": "recovery-demo",
+  "name": "Low Texture Recovery Mission",
+  "description": "Faces the low-texture snowfield, permits bounded recovery, then returns toward the origin.",
+  "failure_policy": "ABORT_MISSION",
+  "maximum_duration_s": 150.0,
+  "maximum_path_length_m": 14.0,
+  "maximum_replans": 0,
+  "return_or_land_policy": "LAND_AT_CURRENT_POSITION",
+  "waypoints": [
+    {
+      "waypoint_id": "snowfield-entry",
+      "goal": {"north_offset_m": 0.0, "east_offset_m": -2.0, "timeout_s": 65.0},
+      "required": true,
+      "skippable": false,
+      "maximum_attempts": 1,
+      "verification_hold_s": 1.0,
+      "failure_action": "ABORT_MISSION"
+    },
+    {
+      "waypoint_id": "snowfield-view",
+      "goal": {"north_offset_m": 0.0, "east_offset_m": -4.0, "horizontal_tolerance_m": 0.75, "timeout_s": 80.0},
+      "required": false,
+      "skippable": true,
+      "maximum_attempts": 1,
+      "verification_hold_s": 1.0,
+      "failure_action": "SKIP_OPTIONAL"
+    },
+    {
+      "waypoint_id": "healthy-return-staging",
+      "goal": {"north_offset_m": 0.0, "east_offset_m": 0.0, "timeout_s": 65.0},
+      "required": true,
+      "skippable": false,
+      "maximum_attempts": 1,
+      "verification_hold_s": 1.0,
+      "failure_action": "ABORT_MISSION"
+    }
+  ]
+}

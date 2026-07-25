@@ -1,0 +1,260 @@
+PROJECT POLARIS EGO-CONTEXT MEMORY ARCHITECTURE
+==============================================
+
+PURPOSE
+-------
+Ego-Context Memory is transient semantic working memory for one mission. It
+answers questions such as:
+
+  What is the mission doing?
+  Which component currently owns requested motion?
+  What is the latest perception condition?
+  What safety state and collision evidence exist?
+  What semantic scene belief and shadow validation are current?
+  Which meaningful transitions happened recently?
+
+It is not authoritative mission state, a flight controller, a command source,
+or the durable mission log.
+
+COMPONENT DIAGRAM
+-----------------
+
+ authoritative runtime records
+ MissionState, GoalDecision, RecoveryDecision, AvoidanceDecision,
+ SafeMotion, NavigationState, ConfidenceReport, CollisionState,
+ observation transitions, VLMSceneState
+                  |
+                  v
+       +-----------------------------+
+       | RuntimeContextProjection    |
+       +--------------+--------------+
+                      |
+                      v
+       +-----------------------------+
+       | EgoContextCoordinator       |
+       | one-way projection          |
+       | edge detection              |
+       | SemanticFusion              |
+       | shadow validation           |
+       +--------------+--------------+
+                      |
+                      v
+       +----------------------------------------------------------+
+       | EgoContextMemory                                         |
+       |                                                          |
+       | MissionContext       NavigationContext                   |
+       | PerceptionContext    SafetyContext                       |
+       | MissionSummary       deque[EgoContextEvent] max 256      |
+       +---------------------------+------------------------------+
+                                   |
+                                   v
+                         immutable EgoContextSnapshot
+                              /              \
+                             v                v
+                     Operator View      stdout runtime report
+
+No arrow returns from the memory to MissionOrchestrator, navigation,
+avoidance, SafetySupervisor, MAVSDK, or PX4.
+
+DATA MODEL
+----------
+MissionContext
+  mission_id, mission_name, phase, result, current_objective,
+  current_waypoint_id/index/count, attempt, waypoint_type, completion_mode,
+  completed/skipped/failed waypoint tuples, observation_status.
+
+NavigationContext
+  navigator_state, recovery_state, active_perception_owns_motion, strategy,
+  goal distance, heading error, avoidance state/count, recovery count,
+  no_progress, retry_count, and recent recovery outcomes.
+
+PerceptionContext
+  visual/depth health, stability, aggregate condition, freshness, centre risk,
+  latest raw VLM status/terrain/landmarks/target/confidence/texture/summary,
+  model/timestamp/frame sequence, immutable FusedSceneContext, and the latest
+  immutable SemanticValidationRecord.
+
+SafetyContext
+  supervisor state, emergency state, collision and hard-override flags,
+  current ownership, collision count, latest safety reason, landing state,
+  and disarm state.
+
+MissionSummary
+  recovery/avoidance/observation counts, mission confidence and elapsed time,
+  completed/skipped count, emergency transition counts, collision count,
+  replan count, and mission result.
+
+EgoContextEvent
+  sequence, monotonic timestamp, category, message, immutable metadata.
+
+EgoContextSnapshot
+  revision, last update timestamp, all five context records, and an immutable
+  tuple of recent events.
+
+EgoContextCoordinator
+  The adapter from authoritative records to semantic records. It owns local
+  edge state, counters, SemanticFusion, and SemanticObservationValidator. It
+  has no send or command-transmission API.
+
+WHY THIS IS WORKING MEMORY, NOT A LOGGER
+----------------------------------------
+1. It stores compact current meaning, not every raw sample.
+2. The event buffer is bounded and old events are evicted.
+3. It resets between missions.
+4. It contains no RGB arrays, pseudo-depth maps, video, or full telemetry log.
+5. It creates immutable read snapshots suitable for UI and reasoning.
+6. Durable reproduction belongs to mission artifacts and replay.
+
+THREAD SAFETY AND IMMUTABILITY
+------------------------------
+EgoContextMemory uses an RLock. Context models are frozen dataclasses. Updates
+use dataclasses.replace() and snapshots return frozen records plus event tuples.
+Event metadata is recursively frozen:
+
+  dictionaries -> MappingProxyType
+  list/tuple    -> tuple
+  set           -> sorted tuple
+  enum          -> enum value
+
+Non-finite floats and unsupported metadata objects are rejected. A caller
+cannot mutate a snapshot to alter runtime state.
+
+BOUNDED EVENT BUFFER
+--------------------
+Default capacity is 256 events:
+
+  EgoContextMemory.DEFAULT_EVENT_CAPACITY = 256
+
+The deque silently removes the oldest retained event when full. Event sequence
+numbers remain monotonic during a mission. The coordinator's
+maximum_event_buffer_usage metric measures retained size, while emitted event
+count measures lifetime emissions.
+
+EVENT EDGE DETECTION
+--------------------
+The coordinator prevents routine projection polling from becoming event spam.
+Mechanisms include:
+
+  cursors for cumulative mission transitions and observation events
+  sets for completed, skipped, and failed waypoints
+  previous-state edges for mission, navigator, avoidance, recovery,
+  visual/depth condition, depth staleness, emergency, supervisor, ownership,
+  hard override, collision, landing, and disarm
+  strict frame ordering inside SemanticFusion
+  meaningful fused signature excluding confidence-only fluctuations
+  one semantic-validation record per observation waypoint
+
+Representative event categories:
+
+  MISSION, WAYPOINT, OBSERVATION, NAVIGATION, AVOIDANCE, RECOVERY,
+  ACTIVE_PERCEPTION, PERCEPTION, SCENE_FUSION, SEMANTIC_VALIDATION,
+  SAFETY, COLLISION, OWNERSHIP
+
+The duplicate_event_count metric currently reports a literal zero; it is not a
+measured count of rejected duplicates. Do not present it as measured latency or
+deduplication performance.
+
+RESET BETWEEN MISSIONS
+----------------------
+EgoContextMemory.reset() clears contexts, events, event sequence, revision, and
+updated timestamp.
+
+EgoContextCoordinator.start_mission() also clears edge history, counters,
+semantic validation, and fusion. Fusion receives the mission start timestamp
+as an epoch so a pre-mission or late in-flight semantic result cannot enter the
+new mission window.
+
+ONE-WAY PROJECTION
+------------------
+The direction is deliberately one way:
+
+  controllers -> decisions -> EgoContextCoordinator -> memory -> view
+
+There is no reverse dependency:
+
+  memory -X-> DesiredMotion
+  memory -X-> SafeMotion
+  memory -X-> waypoint completion
+  memory -X-> mission policy
+  memory -X-> MAVSDK
+
+Tests confirm the coordinator has no send method, VLM state is absent from
+NavigationState, ownership and requested motion are unchanged by semantic
+projection, and shadow validation does not alter the deterministic outcome.
+
+OPERATOR VIEW INTEGRATION
+-------------------------
+MissionDemo passes the immutable snapshot through IntegratedDisplay to
+OperatorRenderer.compose(). The mission panel can show context revision,
+navigation ownership, raw VLM status, fused status/target/evidence/landmarks,
+semantic-validation classification/source, latest event, safety, collision,
+landing, and completion counts.
+
+The standalone scripts/operator_view.py does not construct EgoContextMemory or
+VLM/fusion; semantic context display is an integrated mission feature.
+
+RELATIONSHIP TO ARTIFACTS AND REPLAY
+------------------------------------
+Mission artifacts are durable JSON schema version 1. They contain mission and
+configuration snapshots, transitions, waypoint outcomes, generated waypoints,
+compressed navigation records, collision evidence, bounds, and landing result.
+
+Replay converts that durable deterministic record into a chronological textual
+summary. Current artifacts intentionally do not persist Ego-Context, VLM,
+fusion, or semantic-validation fields. Those are transient working memory and
+stdout diagnostics. This avoids an artifact/replay schema change, but means
+exact past semantic stdout cannot be reconstructed from JSON artifacts.
+
+EXAMPLE SUPPORTED CONTEXT SNAPSHOT
+----------------------------------
+The following is illustrative field usage, not a captured runtime dump:
+
+  MissionContext
+    phase                 = WAYPOINT_EXECUTE
+    current_waypoint_id   = rock-observation
+    waypoint_type         = OBSERVATION
+    observation_status    = OBSERVING
+
+  NavigationContext
+    strategy              = ACTIVE_PERCEPTION_OBSERVATION
+    goal_distance_m       = 2.93
+    recovery_state        = IDLE
+
+  PerceptionContext
+    visual_health         = 0.84
+    depth_health          = 1.00
+    depth_stability       = 0.98
+    centre_risk           = 0.16
+    vlm_status            = SUCCESS or a typed degraded status
+    fused_scene.status    = INSUFFICIENT_EVIDENCE/STABLE/CONFLICTED/STALE
+
+  SafetyContext
+    supervisor_state      = PASS_THROUGH or another current mode
+    emergency_state       = CLEAR
+    collision_detected    = false
+
+The numeric deterministic observation values above are rounded from retained
+successful artifact 20260724T205546Z_mission.json. Its artifact does not
+contain the VLM/fused fields, so no semantic value is asserted for that run.
+
+EXAMPLE EVENT TIMELINE
+----------------------
+Supported event kinds can form a timeline such as:
+
+  MISSION_STARTED
+  WAYPOINT_STARTED
+  AVOIDANCE_ENTERED
+  AVOIDANCE_CLEARED
+  OBSERVATION_CANDIDATE_ENTERED
+  OBSERVATION_DWELL_STARTED
+  OBSERVATION_COMPLETED
+  WAYPOINT_COMPLETED
+  FUSED_SCENE_STABLE          only if accepted evidence reaches threshold
+  OBSERVATION_SEMANTIC_VALIDATION
+  LANDING_STARTED
+  LANDING_CONFIRMED
+  DISARM_CONFIRMED
+  MISSION_FINISHED
+
+The exact sequence depends on the run. Semantic events annotate; they do not
+cause deterministic transitions.

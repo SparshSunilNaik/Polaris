@@ -1,0 +1,236 @@
+PROJECT POLARIS PROFESSOR QUESTIONS AND ANSWERS
+===============================================
+
+ARCHITECTURE AND AUTHORITY
+--------------------------
+1. What can actually command the vehicle?
+   The application transmits only SafeMotion returned by SafetySupervisor.
+   MAVSDK carries it to PX4, and PX4 retains command acceptance, estimation,
+   stabilization, arming, and Offboard behavior.
+
+2. What is the command chain?
+   MissionOrchestrator selects policy; LocalGoalNavigator or bounded active
+   perception proposes motion; ReactiveAvoidanceController rewrites it;
+   SafetySupervisor is the final application gate; _send transmits it.
+
+3. Why is the Safety Supervisor separate from avoidance?
+   Avoidance is motion policy; safety is final enforcement. Separation creates
+   one auditable boundary and defense in depth.
+
+4. Can the mission orchestrator bypass safety?
+   No. It selects objectives and failure policy, but its requested motion still
+   passes through avoidance and SafetySupervisor.
+
+5. Can Operator View command the drone?
+   The integrated display presents state and accepts display/stop interaction;
+   it does not bypass the integrated command chain.
+
+6. Why use one MAVSDK owner?
+   It prevents command contention and makes takeoff, landing, cancellation, and
+   packaged mavsdk_server cleanup one lifecycle.
+
+7. Is PX4 replaced by Polaris?
+   No. Polaris supplies bounded high-level Offboard commands. PX4 remains the
+   flight-control and stabilization system.
+
+8. Is the runtime hard real-time?
+   No. It is Python asyncio with measured loop timing and fail-closed checks,
+   not a real-time scheduling guarantee.
+
+PERCEPTION AND DEPTH
+--------------------
+9. Is the depth output metric?
+   No. It is relative monocular pseudo-depth and must not be described as metres
+   to an obstacle or rock.
+
+10. What does the 3x3 grid represent?
+    A coarse relative risk summary used by deterministic reactive avoidance.
+    It is not a metric occupancy map.
+
+11. Why not process every camera frame?
+    A FIFO would accumulate stale inference. Latest-frame workers bound latency
+    and memory at the cost of intentionally dropping superseded frames.
+
+12. How is stale perception handled?
+    Required stale camera or depth while armed/airborne is an immediate hard
+    condition; it does not enter temporal confirmation.
+
+13. Why is visual health separate from depth health?
+    Image quality and inference stability expose different failure modes. The
+    confidence and safety layers can reject either independently.
+
+14. Does no collision recorded prove the path was clear?
+    No. It means CollisionMonitor recorded no unexpected contact. It is not
+    independent physical-clearance certification.
+
+OBSERVATION SEMANTICS
+---------------------
+15. What completes an observation waypoint?
+    Configured distance, heading, visual health, depth health/stability, centre
+    risk, speed, collision-free state, stable dwell, and fresh depth evidence.
+
+16. Is observation completion object detection?
+    No. It proves deterministic conditions near a configured waypoint, not
+    recognition of the expected physical object.
+
+17. How do you prevent one depth frame from counting repeatedly?
+    ObservationTracker requires a distinct source frame sequence and strictly
+    newer inference timestamp before accepting fresh evidence.
+
+18. Why use inference time instead of control-loop time for dwell?
+    The 10 Hz loop may consume the same slower depth result repeatedly. Counting
+    inference evidence avoids manufacturing confidence from duplicate reads.
+
+19. Why is completion accepted after transmission?
+    The implementation requires successful command transmission and no hard
+    safety override before accepting completion, so blocked control cannot be
+    recorded as safety-approved observation completion.
+
+20. What happens when observation wait expires?
+    The tracker resets deterministic observation dwell and returns to positional
+    handling; subsequent timeout/failure policy remains with the mission logic.
+
+21. Is the reported observation distance rock range?
+    No. It is local-NED distance to the configured waypoint coordinate.
+
+22. Why require low speed during observation?
+    It prevents a moving pass from being labelled a stable observation.
+
+ACTIVE PERCEPTION AND REPLANNING
+--------------------------------
+23. What is active perception here?
+    Bounded hover/yaw behavior used to improve a poor view and to own yaw during
+    observation dwell.
+
+24. Why is active perception yaw-only?
+    It limits collision exposure and planning complexity. The cost is inability
+    to solve viewpoints requiring translation.
+
+25. Can active perception ignore emergency risk?
+    No. Only zero-translation, recognized active-perception motion may use a
+    short temporal confirmation process; timeout confirms and hard-aborts.
+
+26. Is bounded replanning a global planner?
+    No. It inserts a limited nearby staging waypoint under configured bounds.
+    It does not search a map or prove route clearance.
+
+27. How many replans are allowed in the full mission?
+    The current mission and orchestrator configurations allow at most one.
+
+28. What constrains generated waypoints?
+    Offset, timeout, mission duration/path/displacement, world bounds, identifier
+    uniqueness, and the configured maximum replan count.
+
+SAFETY AND FAILURE HANDLING
+---------------------------
+29. Which hazards abort immediately?
+    Examples include disconnection, invalid/non-finite data, collision, stale
+    required state/perception, lost expected Offboard mode, critical confidence
+    or depth, control gap, and displacement violation.
+
+30. Why temporally confirm any emergency depth?
+    A stationary yaw maneuver can receive one noisy relative-depth frame. The
+    exception is narrow, zero-translation, and fails closed on timeout.
+
+31. Does temporal confirmation delay hazards during translation?
+    No. Emergency centre risk during ordinary translational motion confirms
+    immediately.
+
+32. What happens on a hard override?
+    SafeMotion becomes zero with hard_override=true and LAND recommended. The
+    waypoint becomes a hard failure and terminal hover/landing follows.
+
+33. What happens on Ctrl+C?
+    It records an operator-interruption abort; landing cleanup is shielded from
+    cancellation before workers and the MAVSDK owner close.
+
+34. What if command transmission fails?
+    The waypoint records a hard failure and does not accept observation
+    completion; exception handling attempts controlled landing cleanup.
+
+35. What does confirmed landing mean?
+    The application sent the terminal sequence and received fresh landed and
+    disarmed telemetry. It is not external ground truth.
+
+36. Why does uncertainty timeout confirm rather than clear?
+    Missing fresh evidence cannot prove safety. Failing closed prevents
+    indefinite yaw or renewed translation under unresolved emergency risk.
+
+VLM, FUSION, AND EGO-CONTEXT
+----------------------------
+37. Can the VLM cause waypoint completion?
+    No. Deterministic ObservationTracker and mission verification own completion.
+
+38. Can the VLM prevent an abort or clear a collision?
+    No. VLM/fusion/Ego-Context values are absent from SafetySupervisor.evaluate.
+
+39. Why include a VLM if it has no authority?
+    Shadow mode permits latency, agreement, conflict, and semantic usefulness to
+    be evaluated before any safety-reviewed authority is considered.
+
+40. Is VLM enabled in normal mission commands?
+    No. It is disabled by default and requires the explicit --vlm flag plus the
+    configured Ollama/model infrastructure.
+
+41. What does semantic fusion do?
+    It accepts fresh ordered VLM evidence within configured windows and produces
+    stable, conflicted, or insufficient fused scene context. It is not Bayesian
+    state estimation or field-calibrated probability.
+
+42. What is Ego-Context?
+    A one-way typed semantic projection of runtime state with immutable snapshots
+    and bounded events. It has no flight-command API.
+
+43. Why immutable snapshots?
+    They prevent consumers from mutating shared semantic state and make ownership
+    and event edges easier to audit.
+
+44. Are semantic results retained in mission artifacts?
+    No. Current schema-version-1 mission JSON omits VLM, fusion, Ego-Context,
+    semantic validation, and invocation flags. The final stdout report is
+    transient unless separately captured.
+
+EVIDENCE AND RESULTS
+--------------------
+45. What is the strongest retained successful evidence?
+    20260724T205546Z_mission.json records a completed four-waypoint simulator
+    mission, deterministic observation completion, one recovery, four avoidance
+    transitions, zero recorded collisions, and confirmed landing/disarm.
+
+46. What does the latest retained full-plan artifact show?
+    20260725T082730Z_mission.json starts at rock-observation, times out, accepts
+    one bounded replan, times out again, aborts, and confirms landing/disarm.
+
+47. Does the no-flight artifact prove a mission completed?
+    No. 20260725T082547Z_mission.json records grounded readiness with autonomy
+    disabled and no command transmitted; its final label is NO_FLIGHT_COMPLETED.
+
+48. Can the exact original launch commands be recovered from artifacts?
+    No. Invocation flags such as --start-waypoint and --vlm are not persisted.
+
+49. Does the successful artifact prove VLM rock recognition?
+    No. It predates current expected-target metadata and contains no persisted
+    semantic evidence.
+
+50. Does the full mission land on the visible pad?
+    No such claim is supported. The final target is explicitly surrogate staging
+    before an unvalidated gate, followed by land-at-current-position policy.
+
+51. How many tests pass?
+    The current recorded complete result is 285 passing tests. Focused recorded
+    counts are 44 for VLM service/worker/fusion/validation and 26 for fusion plus
+    semantic validation. These counts are test-suite evidence, not flight proof.
+
+52. Are the artifacts independent proof?
+    No. They are useful application-generated evidence and replay input, but are
+    unsigned and omit raw synchronized sensors and external ground truth.
+
+53. What is the central contribution?
+    A clear safety architecture for combining bounded deterministic autonomy,
+    fresh-evidence observation semantics, and optional learned semantic context
+    without allowing the learned observer to acquire hidden control authority.
+
+54. What should be done before hardware flight?
+    Hardware-in-the-loop testing, calibrated redundant sensing, real-time timing
+    analysis, geofencing, independent emergency authority, regulatory/operational
+    review, and staged flight tests with an independent safety assessment.

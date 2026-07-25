@@ -1,0 +1,159 @@
+PROJECT POLARIS DEMO EXECUTION PLAN
+===================================
+
+DEMO GOAL
+---------
+Show a bounded simulator mission, the final safety gate, deterministic
+observation completion, controlled landing, and the observer-only semantic
+path without overstating what one run proves.
+
+TERMINAL LAYOUT
+---------------
+Terminal 1: PX4 and Gazebo Antarctic simulation.
+Terminal 2: mission process and integrated Operator View.
+Terminal 3: read-only artifact replay fallback.
+
+PRE-DEMO CHECKLIST
+------------------
+1. Close other MAVSDK-owning Polaris applications.
+2. Confirm the virtual environment and dependencies:
+
+     cd ~/Documents/Polaris
+     ./.venv/bin/pip check
+
+3. Validate the two intended mission definitions without connecting or flying:
+
+     ./.venv/bin/python scripts/mission_demo.py \
+       --dry-run --mission two-point-demo --no-display
+     ./.venv/bin/python scripts/mission_demo.py \
+       --dry-run --mission polaris-demo-mission --no-display
+
+4. Prepare these retained artifacts in Terminal 3:
+
+     cd ~/Documents/Polaris
+     PYTHONDONTWRITEBYTECODE=1 ./.venv/bin/python scripts/mission_replay.py \
+       artifacts/mission_runs/20260724T205546Z_mission.json
+     PYTHONDONTWRITEBYTECODE=1 ./.venv/bin/python scripts/mission_replay.py \
+       artifacts/mission_runs/20260725T082730Z_mission.json
+     PYTHONDONTWRITEBYTECODE=1 ./.venv/bin/python scripts/mission_replay.py \
+       artifacts/mission_runs/20260725T082547Z_mission.json
+
+CORE LIVE TRACK
+---------------
+Terminal 1:
+
+  cd ~/Documents/Polaris/PX4-Autopilot
+  POLARIS_WORLD=antarctica ./scripts/start_polaris_sim.sh
+
+Wait until Gazebo is ready and PX4 has started.
+
+Terminal 2, grounded readiness with no command transmission:
+
+  cd ~/Documents/Polaris
+  ./.venv/bin/python scripts/mission_demo.py \
+    --no-flight --mission two-point-demo --display
+
+After that process exits, run the smallest bounded flight first:
+
+  ./.venv/bin/python scripts/mission_demo.py \
+    --mission two-point-demo --display
+
+Only if readiness and the short flight are clean, consider the full mission:
+
+  ./.venv/bin/python scripts/mission_demo.py \
+    --mission polaris-demo-mission --display
+
+Do not run two MAVSDK-based Polaris applications concurrently. The integrated
+mission process already owns telemetry, camera, depth, safety, display, and
+flight-command transmission.
+
+OPTIONAL VLM TRACK
+------------------
+VLM is disabled by default. Use this only after confirming Ollama and the model
+configured in config/vlm.json are available:
+
+  cd ~/Documents/Polaris
+  ./.venv/bin/python scripts/mission_demo.py \
+    --no-flight --mission two-point-demo --display --vlm
+
+Narrate the VLM output as semantic shadow-mode evidence. It does not command
+the vehicle, complete the deterministic observation, clear an emergency, or
+alter SafetySupervisor output. Do not claim VLM operation from a command that
+did not include --vlm.
+
+AUDIENCE CUES
+-------------
+During readiness:
+- Point out autonomy_enabled=false and command_transmitted=false.
+- Show RGB, relative pseudo-depth, risk grid, telemetry, and safety state.
+- State that pseudo-depth is relative, not metric target range.
+
+During flight:
+- Explain the chain: mission -> navigation/recovery -> avoidance -> safety.
+- Point out that only SafeMotion is transmitted.
+- At observation dwell, explain that distinct depth inference frames count;
+  repeated 10 Hz control ticks do not create repeated evidence.
+- At termination, wait for confirmed landing and disarm before stopping PX4.
+
+REPLAY FALLBACK
+---------------
+If live readiness fails, do not improvise around a safety check. Use replay:
+
+- 20260724T205546Z_mission.json:
+  completed four-waypoint simulator mission, one recovery, four avoidance
+  transitions, deterministic observation completion, zero recorded collisions,
+  and confirmed landing/disarm.
+
+- 20260725T082730Z_mission.json:
+  bounded observation timeout, one accepted replan, generated-waypoint timeout,
+  abort, and confirmed landing/disarm. This is failure-path evidence, not a
+  successful full mission.
+
+- 20260725T082547Z_mission.json:
+  grounded no-flight readiness with no transmitted command. It is not a
+  completed flight mission.
+
+Retained artifacts do not persist invocation flags, Ego-Context, VLM results,
+semantic fusion, semantic validation, raw RGB, or raw depth. They cannot prove
+what transient semantic stdout displayed during the original run.
+
+FAILURE RESPONSES
+-----------------
+No camera/depth/PX4 readiness:
+  Stop the live attempt and use replay. Do not weaken a threshold live.
+
+Hard safety override:
+  Let the application execute hover/land cleanup. Explain the recorded reason.
+
+Operator interruption:
+  Ctrl+C is treated as an abort and landing cleanup is shielded. Wait for the
+  application to exit before stopping the simulator.
+
+Display problem with healthy runtime:
+  Do not start a second owner. Prefer the artifact/replay explanation.
+
+CLEAN STOP
+----------
+First let the mission application land, disarm, and exit. Then:
+
+  cd ~/Documents/Polaris/PX4-Autopilot
+  ./scripts/stop_polaris_sim.sh
+  pgrep -alf 'gz sim|px4|mavsdk_server|mission_demo|operator_view'
+
+SPEAKING SCRIPT
+---------------
+"Polaris separates bounded autonomy from learned semantic observation. The
+mission and navigation layers propose motion; reactive avoidance can rewrite
+it; the Safety Supervisor is the final application gate; PX4 stabilizes the
+vehicle. Observation success uses fresh deterministic geometric and health
+evidence. The optional VLM runs in shadow mode so we can evaluate semantic
+agreement without allowing a nondeterministic model to control safety. If this
+live run fails a readiness or safety condition, that refusal is expected
+behavior, and the retained replay shows both successful and bounded-failure
+terminal paths."
+
+CLAIM BOUNDARY
+--------------
+The demo supports a simulator implementation claim. It does not establish
+physical-flight readiness, metric ranging, Antarctic field performance,
+statistical reliability, or VLM-based target recognition in retained runs.

@@ -1,0 +1,272 @@
+PROJECT POLARIS OBSERVATION SEMANTICS STATE MACHINE
+===================================================
+
+PURPOSE
+-------
+An OBSERVATION waypoint can complete before flying to the point target, but
+only after deterministic geometric, perception-quality, risk, motion, dwell,
+and freshness criteria remain satisfied. It is not object detection and it is
+not completed because forward progress becomes difficult.
+
+STATE MACHINE
+-------------
+
+                         outside band or invalid evidence
+                 +---------------------------------------------+
+                 |                                             |
+                 v                                             |
+        +------------------+                                    |
+        | APPROACHING      |                                    |
+        | navigator owns   |                                    |
+        | ordinary motion  |                                    |
+        +--------+---------+                                    |
+                 | all deterministic gates pass on              |
+                 | a distinct fresh depth observation            |
+                 v                                              |
+        +--------------------------+                             |
+        | OBSERVATION_CANDIDATE    |                             |
+        | emit CANDIDATE_ENTERED   |                             |
+        +------------+-------------+                             |
+                     | initialize dwell                          |
+                     v                                           |
+        +--------------------------+     gate invalid             |
+        | OBSERVING                |------------------------------+
+        | zero translation         |     emit DWELL_RESET
+        | bounded yaw may remain   |
+        | emit DWELL_STARTED       |
+        +------------+-------------+
+                     | dwell >= required_stable_s
+                     | AND fresh count >= minimum
+                     v
+             completion_ready
+                     |
+                     | safe command transmitted successfully
+                     | AND no SafetySupervisor hard override
+                     v
+        +--------------------------+
+        | OBSERVATION_COMPLETE     |
+        | completion mode          |
+        | OBSERVATION              |
+        +--------------------------+
+
+Timeout and failure paths:
+
+  first band entry starts maximum_wait_s timer
+             |
+             +-- wait >= timeout before acceptance
+             |      -> emit TIMED_OUT
+             |      -> disable observation completion for this attempt
+             |      -> resume ordinary positional handling
+             |
+             +-- later positional completion
+             |      -> normal POSITION completion path
+             |
+             +-- local-goal timeout/bounds/recovery failure
+                    -> WAYPOINT_FAILED
+                    -> retry / skip / bounded replan / abort policy
+
+  hard safety override / collision / command transmission failure
+             -> hard waypoint failure
+             -> mission ABORT
+             -> controlled landing
+
+IMPLEMENTED STATES AND EVENTS
+-----------------------------
+File: src/polaris/mission/models.py
+
+ObservationState:
+  APPROACHING
+  OBSERVATION_CANDIDATE
+  OBSERVING
+  OBSERVATION_COMPLETE
+
+ObservationEventType:
+  CANDIDATE_ENTERED
+  DWELL_STARTED
+  DWELL_RESET
+  COMPLETED
+  TIMED_OUT
+
+OBSERVATION_CANDIDATE is transitional in the current implementation. The same
+update enters candidate, initializes dwell, then enters OBSERVING. Callers
+normally receive OBSERVING.
+
+EXACT ROCK-OBSERVATION CONFIGURATION
+------------------------------------
+Source: config/missions/polaris_demo.json
+Waypoint: rock-observation
+
+  waypoint type                         OBSERVATION
+  target offset N/E                     +2.0 m / +7.0 m
+  local-goal timeout                    35.0 s
+  required                              true
+  skippable                             false
+  maximum attempts                      1
+  failure action                        REPLAN_AROUND_WAYPOINT
+  expected semantic target metadata     rock
+
+ObservationCompletionConfig fields:
+
+  minimum_goal_distance_m               2.5
+  maximum_goal_distance_m               3.0
+  maximum_heading_error_deg             12.0
+  minimum_visual_health                 0.35
+  minimum_depth_health                  0.40
+  minimum_depth_stability               0.75
+  maximum_centre_risk                   0.45
+  maximum_horizontal_speed_m_s          0.20
+  required_stable_s                     0.60
+  minimum_fresh_observations            3
+  maximum_wait_s                        6.0
+
+The distance band is inclusive. Heading, risk, and speed reject only values
+greater than the configured maximum; health and stability reject values below
+the minimum.
+
+ALL DETERMINISTIC QUALIFICATION GATES
+-------------------------------------
+ObservationTracker rejects or resets dwell when any condition is true:
+
+  collision detected
+  goal distance outside [2.5, 3.0] m
+  local position unavailable or stale
+  absolute heading error > 12 deg
+  camera disconnected or visual state stale
+  depth unavailable or stale
+  visual health < 0.35
+  depth condition CRITICAL
+  depth health < 0.40
+  depth temporal stability < 0.75
+  centre risk > 0.45
+  horizontal speed > 0.20 m/s
+  active-perception state FAILED or ABORT
+
+Freshness requires both:
+
+  source_frame_sequence > 0 and different from the previous sequence
+  inference_timestamp_monotonic strictly newer than the previous timestamp
+
+Dwell is measured from depth inference timestamps, not repeated 10 Hz control
+ticks. Completion readiness requires both 0.60 s dwell and at least three fresh
+observations.
+
+COMMAND OWNERSHIP DURING OBSERVATION
+------------------------------------
+APPROACHING:
+  LocalGoalNavigator proposes ordinary motion. Reactive avoidance and safety
+  can modify or stop it.
+
+OBSERVING:
+  MissionDemo asks ActivePerceptionManager.observation_hold_command() for a
+  command with forward/right/down exactly zero. A bounded yaw rate can remain.
+  Reactive avoidance and SafetySupervisor still evaluate the command.
+
+ACCEPTANCE:
+  ObservationTracker.accept_completion() is called only after the SafeMotion
+  was transmitted successfully and hard_override is false.
+
+WHY DIFFICULTY MOVING IS NOT COMPLETION
+---------------------------------------
+No-progress is a navigation/recovery signal, not observation evidence. It can
+mean obstruction, poor perception, avoidance ownership, or a bad viewpoint.
+
+  no progress -> RECOVER_VIEW -> ActivePerceptionManager yaw scan
+  persistent no progress -> recovery retry or bounded failure
+
+No-progress does not enter ObservationTracker qualification, does not increase
+dwell, and cannot set completion_ready. This prevents a blocked drone from
+being misreported as having observed the target.
+
+HOW THIS AVOIDS FLYING INTO THE TARGET
+--------------------------------------
+The configured target goal remains useful for bearing and approach, but the
+observation completion region is a standoff band at 2.5-3.0 m. Inside the band,
+translation is zeroed and evidence accumulates. Therefore successful semantic
+observation does not require reaching the point or continuing forward into the
+object.
+
+The design does not prove metric physical clearance because monocular depth is
+relative. It does enforce a deterministic local-goal distance band and a
+relative centre-risk maximum in simulation.
+
+OBSERVATION TIMEOUT DETAILS
+---------------------------
+- The 6.0 s timer starts on first entry into the distance band.
+- Remaining outside the band does not start this timer.
+- Leaving and re-entering after it starts does not reset it.
+- Timeout emits TIMED_OUT and permanently disables observation completion for
+  that waypoint attempt.
+- Timeout itself does not fail the waypoint. Ordinary positional navigation
+  resumes, so the waypoint may complete positionally or fail later.
+- A later failure still applies REPLAN_AROUND_WAYPOINT.
+
+REPLAN, SKIP, AND ABORT
+-----------------------
+rock-observation is required and non-skippable. On ordinary failure it can use
+one bounded replan. MissionDemo asks BoundedMissionReplanner for a healthier
+viewpoint staging waypoint or a lateral staging waypoint. Generated waypoint
+constraints include:
+
+  maximum generated offset              2.0 m
+  lateral offset                         1.5 m
+  generated timeout                      20.0 s
+  maximum replans                        1
+
+The generated waypoint is POSITION, required, non-skippable, and aborts on
+failure. If no valid replan exists, the mission aborts.
+
+Skip applies only to optional, explicitly skippable waypoints. In the full
+mission, station-approach is optional and uses SKIP_OPTIONAL. Required
+rock-observation cannot be skipped.
+
+Hard safety failures bypass ordinary retry/skip/replan and abort the mission.
+
+SHADOW SEMANTIC VALIDATION
+--------------------------
+After the deterministic outcome already exists, EgoContextCoordinator records
+one shadow comparison for the observation waypoint.
+
+Evidence preference:
+
+  fresh STABLE fusion -> use FUSED
+  INSUFFICIENT fusion + fresh raw frame -> use SINGLE_FRAME
+  CONFLICTED fusion -> NO_EVIDENCE
+  STALE fusion -> STALE_EVIDENCE
+
+Target matching is exact after case/punctuation/whitespace normalization. A
+positive match requires target_visible=true and expected target label among
+visible_landmarks. scene_summary is not the primary matcher.
+
+Classifications:
+
+  AGREEMENT
+  DISAGREEMENT
+  NO_EVIDENCE
+  LOW_CONFIDENCE
+  STALE_EVIDENCE
+  TARGET_UNSPECIFIED
+
+The validation event is written to Ego-Context only. It cannot gate completion,
+change mission policy, alter navigation, invoke safety, or generate a command.
+
+VERIFIED SUCCESSFUL OBSERVATION EXAMPLE
+---------------------------------------
+Retained artifact:
+  artifacts/mission_runs/20260724T205546Z_mission.json
+
+Verified deterministic rock-observation values:
+
+  completion mode              OBSERVATION
+  completion distance          2.932854 m
+  heading error               -3.861338 deg
+  visual health                0.837095
+  depth health                 1.0
+  depth stability              0.980364
+  centre risk                  0.162900
+  horizontal speed            0.061502 m/s
+  dwell                        0.673042 s
+  fresh observations           3
+  events                       CANDIDATE_ENTERED, DWELL_STARTED, COMPLETED
+
+That artifact predates current semantic fields and does not persist VLM or
+fusion. It proves deterministic observation behavior, not VLM agreement.
