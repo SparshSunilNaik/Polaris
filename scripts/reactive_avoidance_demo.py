@@ -418,16 +418,20 @@ class ReactiveAvoidanceDemo:
         yaw = state.orientation.yaw_deg
         print(f"Arming and taking off to {self.config.takeoff_altitude_m:.1f} m in fixed-position Offboard...")
         self.arming_attempted = True
+        self._record_event("ARM_REQUESTED", "mission_runtime", "Arm command requested")
+        self._record_event("TAKEOFF_REQUESTED", "mission_runtime", "Offboard takeoff requested")
         await self.drone.action.arm()
         self.arm_accepted = True
         await self.drone.offboard.set_position_ned(
             PositionNedYaw(self.origin_north_m, self.origin_east_m, target_down, yaw)
         )
+        self._record_event("OFFBOARD_START_REQUESTED", "mission_runtime", "Offboard start requested")
         await self.drone.offboard.start()
         self.offboard_started = True
         deadline = monotonic() + 30.0
         while monotonic() < deadline:
             state, proximity = snapshot(self.coordinator)
+            self._observe_runtime_state(state)
             await self._takeoff_safety_hook(state)
             report = self.confidence.evaluate(state)
             await self.display.render(self.coordinator, state, report, proximity, None)
@@ -612,6 +616,7 @@ class ReactiveAvoidanceDemo:
         ):
             self.landing_result = "NOT_REQUIRED"
             return
+        self._mark_terminal_landing()
         print("Final zero-velocity hover...")
         with suppress(Exception):
             await self._delay_with_hover(self.config.final_hover_s)
@@ -622,12 +627,15 @@ class ReactiveAvoidanceDemo:
         print("Landing...")
         try:
             landing_command_time = monotonic()
+            self._record_event("LAND_REQUESTED", "mission_runtime", "Land command requested")
             await self.drone.action.land()
+            self._record_event("LANDING_STARTED", "mission_runtime", "Land command accepted")
             await self._after_landing_command()
             deadline = monotonic() + 45.0
             landed_with_fresh_state = False
             while monotonic() < deadline:
                 state = self.coordinator.state
+                self._observe_runtime_state(state)
                 await self._landing_progress(state)
                 if (
                     state.last_in_air_update_monotonic >= landing_command_time
@@ -638,6 +646,7 @@ class ReactiveAvoidanceDemo:
                     disarm_deadline = min(deadline, monotonic() + 5.0)
                     while monotonic() < disarm_deadline:
                         state = self.coordinator.state
+                        self._observe_runtime_state(state)
                         if (
                             state.last_armed_update_monotonic >= landing_command_time
                             and not state.armed
@@ -660,6 +669,15 @@ class ReactiveAvoidanceDemo:
             self.landing_result = f"COMMAND_FAILED: {exc}"
 
     async def _after_landing_command(self) -> None:
+        return
+
+    def _record_event(self, event_type: str, source: str, message: str, **kwargs) -> None:
+        return
+
+    def _observe_runtime_state(self, state: NavigationState) -> None:
+        return
+
+    def _mark_terminal_landing(self) -> None:
         return
 
     async def _landing_progress(self, state: NavigationState) -> None:

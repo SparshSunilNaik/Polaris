@@ -43,6 +43,25 @@ class MissionReplayTests(unittest.TestCase):
         report = format_mission_replay(payload, "artifact.json")
         self.assertIn("Disarm: NOT_REQUIRED", report)
 
+    def test_replay_accepts_optional_ordered_events(self) -> None:
+        payload = self.payload()
+        payload["schema_version"] = 1
+        payload["events"] = [
+            {
+                "sequence": 1,
+                "timestamp_utc": "2026-07-30T00:00:00Z",
+                "elapsed_s": 0.0,
+                "event_type": "MISSION_STARTED",
+                "source": "test",
+                "severity": "INFO",
+                "message": "started",
+                "data": {},
+            }
+        ]
+        from polaris.mission import validate_mission_replay_payload
+
+        validate_mission_replay_payload(payload)
+
     def test_outcome_preserves_completed_with_skips(self) -> None:
         payload = self.payload()
         payload["mission_result"] = "COMPLETED_WITH_SKIPS"

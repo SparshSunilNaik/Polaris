@@ -62,6 +62,19 @@ def validate_mission_replay_payload(payload: Any) -> None:
     abort_reason = payload.get("abort_reason")
     if abort_reason is not None and not isinstance(abort_reason, str):
         raise ValueError("abort_reason must be a string or null")
+    events = payload.get("events")
+    if events is not None:
+        if not isinstance(events, list):
+            raise ValueError("events must be a list when present")
+        previous_sequence = 0
+        for index, event in enumerate(events):
+            if not isinstance(event, dict):
+                raise ValueError(f"events[{index}] must be an object")
+            if event.get("sequence") != previous_sequence + 1:
+                raise ValueError("events sequence must be strictly increasing from 1")
+            previous_sequence += 1
+            if not isinstance(event.get("data"), dict):
+                raise ValueError(f"events[{index}].data must be an object")
 
 
 def format_mission_replay(payload: dict[str, Any], artifact_path: str | Path) -> str:

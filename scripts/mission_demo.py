@@ -62,6 +62,7 @@ from polaris.navigation import (  # noqa: E402
     RecoveryState,
 )
 from polaris.operator_view import OperatorViewConfig  # noqa: E402
+from polaris.observability import MissionEventRecorder, MissionEventType  # noqa: E402
 from polaris.perception.depth import DepthConfig  # noqa: E402
 from polaris.perception.visual_health import VisualHealthConfig  # noqa: E402
 from polaris.simulation import CollisionMonitor  # noqa: E402
@@ -166,6 +167,8 @@ class MissionDemo(LocalGoalDemo):
         self.last_selected_heading_deg: float | None = None
         self.last_observation_decision = None
         self.no_flight_completed = False
+        self.event_recorder = MissionEventRecorder(mission_plan.mission_id)
+        self._polaris_terminal_landing = False
 
     async def run(self) -> None:
         self.supervisor.reset()
@@ -176,6 +179,11 @@ class MissionDemo(LocalGoalDemo):
             start_waypoint=self.args.start_waypoint,
             stop_after_waypoint=self.args.stop_after_waypoint,
         )
+        self._record_event(
+            MissionEventType.MISSION_STARTED,
+            "mission_orchestrator",
+            f"Mission {self.mission_plan.mission_id} started",
+        )
         if self.ego_context is not None:
             self.ego_context.start_mission(
                 self.mission_plan,
@@ -183,6 +191,7 @@ class MissionDemo(LocalGoalDemo):
                 started,
             )
         await self._wait_ready_with_collision()
+        self._record_event(MissionEventType.MISSION_READY, "mission_runtime", "Mission readiness confirmed")
         if self.args.no_flight:
             await self._observe_mission_without_flight()
             return
@@ -208,17 +217,28 @@ class MissionDemo(LocalGoalDemo):
             self.coordinator.set_vlm_observation_enabled(True)
             await self._mission_loop()
         finally:
+            self._record_event(MissionEventType.SHUTDOWN_STARTED, "mission_runtime", "Mission shutdown started")
             self.coordinator.set_vlm_observation_enabled(False)
             self.orchestrator.begin_return_or_land(monotonic())
             await self._shielded_hover_and_land()
             self.orchestrator.mark_landing(self.landing_result, monotonic())
             self.orchestrator.finish(self.landing_result, monotonic())
+            result = self.orchestrator.state.result
+            event = (
+                MissionEventType.MISSION_COMPLETED
+                if result in {MissionResult.COMPLETED, MissionResult.COMPLETED_WITH_SKIPS}
+                else MissionEventType.MISSION_ABORTED
+                if result is MissionResult.ABORTED
+                else MissionEventType.MISSION_FAILED
+            )
+            self._record_event(event, "mission_orchestrator", f"Mission finished with {result.value}")
             self._project_terminal_context(finish=True)
 
     async def _observe_mission_without_flight(self) -> None:
         self.coordinator.set_vlm_observation_enabled(True)
         await self._wait_for_no_flight_vlm_result()
         state, proximity = snapshot(self.coordinator)
+        self._observe_runtime_state(state, self.collision_monitor.latest_state())
         self.mission_origin_ned = (
             state.position_ned_m.x,
             state.position_ned_m.y,
@@ -357,6 +377,12 @@ class MissionDemo(LocalGoalDemo):
         self.last_observation_decision = None
         self.orchestrator.begin_waypoint(now)
         attempt = self.orchestrator.state.current_attempt
+        self._record_event(
+            MissionEventType.WAYPOINT_STARTED,
+            "mission_orchestrator",
+            f"Waypoint {waypoint.waypoint_id} started",
+            data={"waypoint_id": waypoint.waypoint_id, "attempt": attempt},
+        )
         record_start = len(self.navigation_records)
         transition_start = len(self.navigation_transitions)
         recovery_start = len(self.recovery_events)
@@ -383,6 +409,7 @@ class MissionDemo(LocalGoalDemo):
             report = self.confidence.evaluate(state)
             self.collision_monitor.update_vertical_speed(state.velocity_ned_m_s.z)
             collision = self.collision_monitor.latest_state()
+            self._observe_runtime_state(state, collision)
             mission_displacement = self._mission_displacement(state)
 
             goal_decision = self.navigator.update(
@@ -626,6 +653,7 @@ class MissionDemo(LocalGoalDemo):
                     observation_start=observation_start,
                 )
                 self.waypoint_results.append(summary)
+                self._record_event(MissionEventType.WAYPOINT_REACHED, "mission_orchestrator", f"Waypoint {waypoint.waypoint_id} reached", data={"waypoint_id": waypoint.waypoint_id, "completion_mode": "OBSERVATION"})
                 return {
                     "completed": completion.action
                     in {MissionAction.START_WAYPOINT, MissionAction.COMPLETE_MISSION},
@@ -665,6 +693,7 @@ class MissionDemo(LocalGoalDemo):
                         observation_start=observation_start,
                     )
                     self.waypoint_results.append(summary)
+                    self._record_event(MissionEventType.WAYPOINT_REACHED, "mission_orchestrator", f"Waypoint {waypoint.waypoint_id} reached", data={"waypoint_id": waypoint.waypoint_id, "completion_mode": "POSITION"})
                     return {"completed": True, "reason": "Waypoint verified", "hard_failure": False}
 
             next_tick += 1.0 / self.navigation_config.control_loop_hz
@@ -692,6 +721,8 @@ class MissionDemo(LocalGoalDemo):
             observation_start=observation_start,
         )
         self.waypoint_results.append(summary)
+        event = MissionEventType.MISSION_TIMEOUT if "timeout" in reason.lower() else MissionEventType.WAYPOINT_FAILED
+        self._record_event(event, "mission_orchestrator", f"Waypoint {waypoint.waypoint_id} failed: {reason}", severity="ERROR" if hard_failure else "WARNING", data={"waypoint_id": waypoint.waypoint_id, "reason": reason, "hard_failure": hard_failure})
         return {"completed": False, "reason": reason, "hard_failure": hard_failure}
 
     async def _supervised_pause(self, deadline: float) -> bool:
@@ -973,6 +1004,7 @@ class MissionDemo(LocalGoalDemo):
 
     def _record_control_transitions(self, avoidance, now: float) -> None:
         if avoidance.mode.value != self._last_recorded_avoidance:
+            previous = self._last_recorded_avoidance
             self._last_recorded_avoidance = avoidance.mode.value
             self.avoidance_transitions.append(
                 {
@@ -981,6 +1013,12 @@ class MissionDemo(LocalGoalDemo):
                     "mode": avoidance.mode.value,
                 }
             )
+            if avoidance.mode.value == "CLEAR" and previous is not None:
+                self._record_event(MissionEventType.AVOIDANCE_EXITED, "reactive_avoidance", "Avoidance returned to clear")
+            elif avoidance.mode.value != "CLEAR":
+                self._record_event(MissionEventType.AVOIDANCE_ENTERED, "reactive_avoidance", f"Avoidance entered {avoidance.mode.value}", data={"mode": avoidance.mode.value, "waypoint_id": self.orchestrator.state.current_waypoint_id, "centre_risk": avoidance.risk.centre})
+        if avoidance.safe_command.hard_override:
+            self._record_event(MissionEventType.SAFETY_HARD_OVERRIDE, "safety_supervisor", "SafetySupervisor issued hard override", severity="ERROR", data={"reasons": list(avoidance.safe_command.reasons), "recommended_action": avoidance.safe_command.recommended_action.value})
         self._last_recorded_supervisor = append_supervisor_transition(
             self.supervisor_transitions,
             self._last_recorded_supervisor,
@@ -1117,7 +1155,43 @@ class MissionDemo(LocalGoalDemo):
             "abort_reason": state.abort_reason or self.abort_reason,
             "landing_result": self.landing_result,
             "final_result": final_result,
+            "events": self.event_recorder.finalize(),
+            "event_recorder_warnings": self.event_recorder.warnings(),
         }
+
+    def record_event(self, event_type, source: str, message: str, **kwargs) -> None:
+        self._record_event(event_type, source, message, **kwargs)
+
+    def _record_event(self, event_type, source: str, message: str, **kwargs) -> None:
+        try:
+            self.event_recorder.record(event_type, source, message, **kwargs)
+        except Exception as exc:
+            warning = f"Mission event recorder failed for {event_type}: {exc}"
+            self.event_recorder.warn(warning)
+            print(warning, file=sys.stderr)
+
+    def _observe_runtime_state(self, state, collision=None) -> None:
+        try:
+            self.event_recorder.observe_connection(self.connection.connected)
+            self.event_recorder.observe_telemetry(
+                armed=state.armed,
+                in_air=state.in_air,
+                flight_mode=state.flight_mode,
+                mission_state=self.orchestrator.state.state.value,
+                initiated_by_polaris=self._polaris_terminal_landing,
+            )
+            if collision is not None:
+                self.event_recorder.observe_collision(
+                    collision.collision_detected,
+                    data={"count": collision.collision_count, "entity": collision.latest_contacted_entity},
+                )
+        except Exception as exc:
+            warning = f"Mission event recorder telemetry observation failed: {exc}"
+            self.event_recorder.warn(warning)
+            print(warning, file=sys.stderr)
+
+    def _mark_terminal_landing(self) -> None:
+        self._polaris_terminal_landing = True
 
 
 async def run_mission_live(
@@ -1193,6 +1267,7 @@ async def run_mission_live(
     try:
         await coordinator.start()
         await connection.wait()
+        demo.record_event(MissionEventType.PX4_CONNECTED, "mavsdk_connection", "PX4 connection confirmed")
         await demo.run()
     except asyncio.CancelledError:
         demo.abort_reason = "Operator interrupted with Ctrl+C"
