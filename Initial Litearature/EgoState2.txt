@@ -1,0 +1,54 @@
+EgoState
+├── Kinematic State
+│   ├── position x, y, z
+│   ├── velocity vx, vy, vz
+│   ├── roll, pitch, yaw
+│   ├── angular velocity
+│   └── acceleration
+│
+├── Estimator State
+│   ├── pose covariance
+│   ├── velocity covariance
+│   ├── feature count
+│   ├── feature distribution
+│   ├── reprojection error
+│   ├── tracking age
+│   └── VIO status
+│
+├── Perception State
+│   ├── nearest obstacle regions
+│   ├── free-space directions
+│   ├── pseudo-depth confidence
+│   ├── semantic observations
+│   └── camera coverage / blind zones
+│
+├── Environmental State
+│   ├── brightness
+│   ├── contrast
+│   ├── glare
+│   ├── blur
+│   ├── texture score
+│   ├── snow dominance
+│   └── estimated visibility
+│
+├── Temporal State
+│   ├── recent actions
+│   ├── motion streaks
+│   ├── failed directions
+│   ├── recently visited regions
+│   └── time since useful landmark
+│
+├── Mission State
+│   ├── objective
+│   ├── current subgoal
+│   ├── progress
+│   ├── target visibility
+│   └── explored sectors
+│
+└── Safety State
+    ├── NORMAL
+    ├── CAUTIOUS
+    ├── RELOCALIZING
+    ├── HOVERING
+    ├── RETURNING
+    └── EMERGENCY_LAND

@@ -1,0 +1,99 @@
+What the world model remembers
+
+Not raw frames. Compact spatial beliefs:
+
+Region 14
+├── Relative location: 12 m northwest
+├── Terrain: low-texture snowfield
+├── Localization quality: poor
+├── Glare: high
+├── Obstacles: none confidently observed
+├── Last visited: 18 seconds ago
+└── Traversability: risky
+
+And:
+
+Region 9
+├── Relative location: 6 m east
+├── Landmark: exposed dark rock
+├── Localization quality: excellent
+├── Free-space confidence: high
+└── Relocalization value: high
+
+This gives us meaningful behaviour:
+
+avoid revisiting visually useless regions;
+favour textured landmarks when localization degrades;
+remember safe hover zones;
+record failed paths;
+track altitude bands that produced better visibility.
+Confidence engine v0.1
+
+We will initially avoid pretending confidence is scientifically calibrated.
+
+Instead, create normalized health scores:
+
+localization_health
+depth_health
+visibility_health
+obstacle_health
+mission_health
+overall_navigation_health
+
+An initial rule-based fusion:
+
+overall_navigation_health =
+    0.35 × localization_health
+  + 0.25 × visibility_health
+  + 0.25 × obstacle_health
+  + 0.15 × depth_health
+
+But the worst critical score can override the average:
+
+if localization_health < 0.25:
+    do not continue normal forward flight
+
+Otherwise, an excellent depth estimate could mathematically hide catastrophic localization failure. Averages are sneaky little liars like that.
+
+Behaviour policy
+Health > 0.75
+    Normal movement
+
+0.50–0.75
+    Reduce speed
+    Increase obstacle clearance
+    Avoid low-texture direction
+
+0.25–0.50
+    Hover
+    Small yaw scan
+    Search for contrast or landmarks
+    Optionally climb slightly
+
+Below 0.25
+    Stop mission progress
+    Attempt controlled relocalization
+    Return toward last reliable region
+    Land after timeout
+
+What we borrow from AutoFly’s depth design
+
+AutoFly does something more sophisticated than simply displaying a depth map. It:
+
+generates pseudo-depth using Depth Anything V2;
+divides the map into patches;
+embeds those patches into depth tokens;
+aligns them with visual-language tokens using a dedicated projector.
+
+Their ablation improved overall success from 44.0% to 47.9% and reduced collision rate from 24.5% to 21.9%. In more difficult scenarios, the pseudo-depth branch produced larger gains, including a reported 9.5-point collision-rate reduction with dynamic obstacles.
+
+
+
+PX4 simulator
+→ MAVSDK flight control
+→ RGB camera feed
+→ Depth Anything V2
+→ Ego State
+→ confidence engine
+→ active perception
+→ safety controller

@@ -1,0 +1,30 @@
+NORMAL
+   │
+   ├── mild degradation
+   ▼
+CAUTIOUS
+   │
+   ├── perception remains weak
+   ▼
+OBSERVE
+   │
+   ├── recovered
+   │       └────────► NORMAL
+   │
+   ├── no recovery
+   ▼
+RELOCALIZE
+   │
+   ├── recovered
+   │       └────────► CAUTIOUS
+   │
+   ├── failed / timeout
+   ▼
+RETREAT
+   │
+   ├── reached reliable region
+   │       └────────► OBSERVE
+   │
+   └── impossible / critical
+           ▼
+     EMERGENCY_HOVER_OR_LAND

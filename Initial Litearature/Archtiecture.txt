@@ -1,0 +1,74 @@
+v0.1 
+ 
+                   Mission Instruction
+              “Search the marked sector”
+                            │
+                            ▼
+                 Mission / Semantic Layer
+                  slow reasoning: 0.5–2 Hz
+                            │
+                            ▼
+┌──────────────── RGB Perception Stack ────────────────┐
+│                                                      │
+│  RGB frames ──► pseudo-depth ──► obstacle geometry   │
+│       │                                              │
+│       ├────────► visual features ──► VIO interface   │
+│       │                               ▲              │
+│       └────────► semantic detection   │ Pixhawk IMU  │
+└─────────────────────────┬────────────────────────────┘
+                          ▼
+                Belief Formation Layer
+                          ▼
+                    Ego State 2.0
+                          ▼
+                Persistent Local World Model
+                          ▼
+                  Confidence Engine
+                          ▼
+                Local Motion Planner
+                          ▼
+                 Safety Supervisor
+                          ▼
+                MAVSDK velocity commands
+                          ▼
+                         PX4
+
+
+AutoFly, DEPTH ANYTHING v2, vins, VLA-An
+
+MISSION LAYER
+Language instruction / mission objective
+Runs occasionally
+             │
+             ▼
+SEMANTIC VLA PLANNER
+Multi-frame context + Ego State summary
+Outputs:
+- local 3D waypoint
+- desired yaw
+- intent / subgoal
+Runs around 0.5–2 Hz
+             │
+             ▼
+LOCAL GEOMETRIC PLANNER
+Pseudo-depth + VIO state + local world model
+Produces dynamically feasible short trajectory
+Runs around 5–10 Hz
+             │
+             ▼
+SAFETY SUPERVISOR
+Collision checks
+Confidence checks
+Trajectory correction
+Emergency hover/recovery
+Runs around 10–20 Hz
+             │
+             ▼
+PX4
+Attitude and flight stabilization
+
+
+Bottom line
+AutoFly is our sensor and spatial-reasoning reference.
+VLA-AN is our planning, temporal and deployment reference.
+Polaris becomes the uncertainty-aware system connecting them.
