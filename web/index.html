@@ -46,7 +46,55 @@
 </header>
 
 <main id="main">
-  <!-- HERO -->
+  <section class="hero" aria-labelledby="hero-title">
+    <svg class="contours" id="contours" aria-hidden="true" preserveAspectRatio="xMidYMid slice"></svg>
+    <div class="wrap hero-head">
+      <p class="kicker">Project Polaris</p>
+      <h1 id="hero-title">Autonomy with a chain of command.</h1>
+      <p class="lede">A PX4 quadcopter flies a simulated Antarctic survey. Navigation proposes each move, perception and avoidance may revise it, and a deterministic Safety Supervisor has the final word before anything reaches the autopilot. A vision-language model watches the whole time, but it can never steer.</p>
+    </div>
+
+    <div class="wrap">
+      <div class="console" id="console">
+        <figure class="map-wrap">
+          <svg class="map" id="map" viewBox="-3 -12 25 20" role="img" aria-labelledby="map-desc"><desc id="map-desc">Top-down map of the Polaris Antarctic world: takeoff cross, a walled corridor with an offset obstacle, rock landmarks to the north, a research station to the south, a gate and a landing pad to the east. The drone flies between mission waypoints.</desc></svg>
+          <figcaption class="map-legend">
+            <span class="lg lg-wp">Waypoint</span>
+            <span class="lg lg-obs">Observation stand-off, 2.5 to 3.0 m</span>
+            <span class="lg lg-trail">Flown route</span>
+            <span class="scale"><i id="scale-bar"></i>5 m</span>
+          </figcaption>
+        </figure>
+
+        <div class="replay">
+          <div class="run-switch" role="group" aria-label="Retained mission">
+            <button type="button" data-run="success" aria-pressed="true">Completed run</button>
+            <button type="button" data-run="failure" aria-pressed="false">Bounded failure run</button>
+          </div>
+
+          <dl class="readout">
+            <div><dt>Phase</dt><dd id="r-phase">PREFLIGHT</dd></div>
+            <div><dt>Waypoint</dt><dd id="r-wp">none</dd></div>
+            <div><dt>Observation</dt><dd id="r-obs">n/a</dd></div>
+          </dl>
+
+          <ol class="wps" id="wps" aria-label="Waypoints"></ol>
+          <ol class="events" id="events" aria-live="polite" aria-label="Mission events"></ol>
+
+          <div class="transport">
+            <button type="button" class="play" id="play" aria-label="Play replay">
+              <svg class="i-play" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg>
+              <svg class="i-pause" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 2.5h3v11H4zM9 2.5h3v11H9z" fill="currentColor"/></svg>
+            </button>
+            <label class="visually-hidden" for="scrub">Replay position</label>
+            <input type="range" id="scrub" min="0" max="1000" value="0">
+          </div>
+          <dl class="summary" id="summary"></dl>
+        </div>
+      </div>
+      <p class="note">Waypoints, world geometry and outcomes come from the repository’s mission config, Gazebo world and retained mission summaries. The flight path between waypoints and the spacing of events are drawn schematically, not replayed from telemetry.</p>
+    </div>
+  </section>
   <!-- CHAIN -->
   <!-- AVOID -->
   <!-- OBSERVE -->
@@ -62,5 +110,6 @@
 </footer>
 
 <script src="js/theme.js"></script>
+<script src="js/mission.js"></script>
 </body>
 </html>
