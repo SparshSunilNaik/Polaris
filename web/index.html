@@ -207,8 +207,106 @@
       <p class="fine obs-note">Gates from <code>config/missions/polaris_demo.json</code>; starting values from the retained successful mission. Collision state, successful command transmission and the absence of a hard safety override are also required. These are waypoint-relative checks, not object recognition.</p>
     </div>
   </section>
-  <!-- RESULTS -->
-  <!-- RUN -->
+  <section id="results" class="band results" aria-labelledby="results-title">
+    <div class="wrap">
+      <div class="intro">
+        <h2 id="results-title">What the evidence supports</h2>
+        <p>Three retained mission artifacts, each kept for the claim it can actually back up, plus the test suite behind the v1.0 baseline.</p>
+      </div>
+
+      <div class="res-grid">
+        <article class="res res-main">
+          <p class="res-tag ok">Completed</p>
+          <h3>Full Antarctic mission</h3>
+          <dl class="res-big">
+            <div><dt>Elapsed</dt><dd>106.3<small> s</small></dd></div>
+            <div><dt>Waypoints</dt><dd>4<small> of 4</small></dd></div>
+            <div><dt>Collisions</dt><dd>0<small> recorded</small></dd></div>
+          </dl>
+          <table class="res-table">
+            <caption class="visually-hidden">Completed mission metrics</caption>
+            <tbody>
+              <tr><th scope="row">Recoveries, avoidances</th><td>1, 4</td></tr>
+              <tr><th scope="row">Path length proxy</th><td>16.40 m</td></tr>
+              <tr><th scope="row">Displacement from start</th><td>11.55 m</td></tr>
+              <tr><th scope="row">Max measured speed</th><td>0.37 m/s</td></tr>
+              <tr><th scope="row">Max commanded speed</th><td>0.35 m/s</td></tr>
+              <tr><th scope="row">Loop deadline misses</th><td>3</td></tr>
+              <tr><th scope="row">Landing, disarm</th><td>confirmed, confirmed</td></tr>
+            </tbody>
+          </table>
+          <p class="fine">artifacts/mission_runs/20260724T205546Z_mission.json</p>
+        </article>
+
+        <article class="res">
+          <p class="res-tag bad">Aborted on purpose</p>
+          <h3>Bounded failure</h3>
+          <p>Starts at the rock observation, times out, accepts one generated healthier-viewpoint waypoint, times out again and aborts. Landing and disarm confirmed with zero recorded collisions.</p>
+          <p class="res-claim">Supports: timeout, replan, abort and terminal-path behaviour.</p>
+          <p class="fine">20260725T082730Z_mission.json</p>
+        </article>
+
+        <article class="res">
+          <p class="res-tag">Grounded</p>
+          <h3>No-flight readiness</h3>
+          <p>Autonomy disabled: perception and decisions are built, but no command is transmitted. Zero path, displacement and command; no landing needed.</p>
+          <p class="res-claim">Supports: grounded perception and decision construction, not airborne behaviour.</p>
+          <p class="fine">20260725T082547Z_mission.json</p>
+        </article>
+
+        <article class="res res-tests">
+          <p class="res-tag ok">v1.0.0-polaris-core</p>
+          <h3>292 tests passing</h3>
+          <p>Plus 6 subtests, across mission orchestration, observation semantics, avoidance, the safety supervisor, depth processing, Ego-Context memory and artifact replay. Stock QGroundControl was verified to coexist on its own ground-station endpoint.</p>
+        </article>
+      </div>
+
+      <div class="limits">
+        <h3>Where the claims stop</h3>
+        <ul>
+          <li><b>Simulation only.</b> PX4 SITL and Gazebo Harmonic; nothing here shows physical airworthiness or Antarctic field operation.</li>
+          <li><b>Depth is relative.</b> Depth Anything gives pseudo-depth, so risk thresholds are not metres and cannot be separation guarantees.</li>
+          <li><b>Not hard real-time.</b> Python asyncio measures deadline misses but cannot guarantee scheduling.</li>
+          <li><b>Local, bounded planning.</b> Avoidance reads a 3×3 grid and replanning inserts one nearby waypoint; there is no global planner or occupancy map.</li>
+          <li><b>Semantics have no authority.</b> A safety strength for evaluation, but the VLM cannot yet adapt the mission.</li>
+          <li><b>Two runs are not a rate.</b> One retained success and one retained abort say nothing about reliability or generalisation.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+  <section id="run" class="band run" aria-labelledby="run-title">
+    <div class="wrap run-grid">
+      <div class="intro">
+        <h2 id="run-title">Run it</h2>
+        <p>Polaris targets PX4 SITL with Gazebo Harmonic and was developed on Apple Silicon. You need a PX4-Autopilot checkout; the repository supplies the Polaris launch scripts, the Antarctic world and macOS setup notes in <code>PX4-Autopilot/docs/MAC_SIM_SETUP.md</code>.</p>
+        <p>Keep the simulator running in one terminal and run one MAVSDK-based Polaris app at a time.</p>
+      </div>
+      <ol class="steps">
+        <li>
+          <h3>Install the Python side</h3>
+          <div class="cmd"><pre><code>git clone https://github.com/SparshSunilNaik/Polaris.git
+cd Polaris
+python3 -m venv .venv
+./.venv/bin/pip install -r requirements-depth.txt</code></pre><button type="button" class="copy" aria-label="Copy install commands">Copy</button></div>
+        </li>
+        <li>
+          <h3>Start the Antarctic simulation</h3>
+          <div class="cmd"><pre><code>cd PX4-Autopilot
+POLARIS_WORLD=antarctica ./scripts/start_polaris_sim.sh</code></pre><button type="button" class="copy" aria-label="Copy simulation command">Copy</button></div>
+        </li>
+        <li>
+          <h3>Check the mission, then fly it</h3>
+          <div class="cmd"><pre><code>./.venv/bin/python scripts/mission_demo.py --dry-run --mission polaris-demo-mission --no-display
+./.venv/bin/python scripts/mission_demo.py --mission polaris-demo-mission --display</code></pre><button type="button" class="copy" aria-label="Copy mission commands">Copy</button></div>
+          <p class="hint">Add <code>--vlm</code> to run the semantic shadow path; it needs Ollama with <code>qwen2.5vl:7b</code>. <code>--no-flight</code> exercises perception and decisions on the ground.</p>
+        </li>
+        <li>
+          <h3>Run the tests</h3>
+          <div class="cmd"><pre><code>PYTHONDONTWRITEBYTECODE=1 ./.venv/bin/python -m unittest discover -s tests -v</code></pre><button type="button" class="copy" aria-label="Copy test command">Copy</button></div>
+        </li>
+      </ol>
+    </div>
+  </section>
 </main>
 
 <footer class="foot">
@@ -223,5 +321,6 @@
 <script src="js/chain.js"></script>
 <script src="js/avoid.js"></script>
 <script src="js/observe.js"></script>
+<script src="js/copy.js"></script>
 </body>
 </html>
