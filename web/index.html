@@ -123,7 +123,54 @@
       </div>
     </div>
   </section>
-  <!-- AVOID -->
+  <section id="avoid" class="band avoid" aria-labelledby="avoid-title">
+    <div class="wrap">
+      <div class="intro">
+        <h2 id="avoid-title">Paint the risk, watch it react</h2>
+        <p>Depth Anything turns each camera frame into relative pseudo-depth, which becomes a 3×3 risk grid. Click cells to raise their risk and the real avoidance controller, ported to your browser, decides at 10 Hz. It never trusts a single frame: blockage has to persist across new depth frames before it acts.</p>
+      </div>
+
+      <div class="avoid-grid">
+        <div class="cam">
+          <div class="cam-frame">
+            <div class="cam-scene" aria-hidden="true"></div>
+            <div class="risk" id="risk" role="group" aria-label="Risk grid, 3 by 3. Click a cell to raise its risk; Shift-click to lower it."></div>
+          </div>
+          <div class="presets" role="group" aria-label="Preset scenes" id="presets"></div>
+          <div class="percep">
+            <label for="p-visual">Visual health <output id="p-visual-out">0.84</output></label>
+            <input type="range" id="p-visual" min="0" max="1" step="0.01" value="0.84">
+            <label for="p-stab">Depth stability <output id="p-stab-out">0.98</output></label>
+            <input type="range" id="p-stab" min="0" max="1" step="0.01" value="0.98">
+          </div>
+        </div>
+
+        <div class="ctl-panel">
+          <div class="mode-row">
+            <div>
+              <p class="mode-label">Avoidance mode</p>
+              <p class="mode" id="mode" data-mode="CLEAR">CLEAR</p>
+            </div>
+            <svg class="cmd-vec" id="cmd-vec" viewBox="-30 -30 60 60" aria-hidden="true">
+              <circle r="27" class="cv-ring"/><line x1="-27" x2="27" class="cv-axis"/><line y1="-27" y2="27" class="cv-axis"/>
+              <g id="cv-g"><line id="cv-line" x1="0" y1="0" x2="0" y2="0" class="cv-line"/><path id="cv-head" class="cv-head" d="M0 0"/></g>
+              <circle r="3" class="cv-dot"/>
+            </svg>
+          </div>
+          <p class="cmd" id="cmd">forward 0.40 m/s</p>
+          <p class="why" id="why" aria-live="polite">Forward sector clear</p>
+
+          <dl class="sectors" id="sectors"></dl>
+          <dl class="counters" id="counters"></dl>
+          <div class="ctl-foot">
+            <span class="clock" id="clock">t = 0.0 s, depth frame 0</span>
+            <button type="button" class="btn-line" id="avoid-reset">Reset controller</button>
+          </div>
+        </div>
+      </div>
+      <p class="fine avoid-note">Thresholds from <code>config/reactive_avoidance.json</code>: clear 0.35, caution 0.45, stop 0.62, emergency 0.90. Risk is relative pseudo-depth, not metres. The navigator here always requests 0.40 m/s forward. In flight, a sidestep moves the obstacle out of the centre; here the scene stays frozen, so a held blockage eventually trips the 8 s episode limit and aborts, exactly as the controller would.</p>
+    </div>
+  </section>
   <!-- OBSERVE -->
   <!-- RESULTS -->
   <!-- RUN -->
@@ -139,5 +186,6 @@
 <script src="js/theme.js"></script>
 <script src="js/mission.js"></script>
 <script src="js/chain.js"></script>
+<script src="js/avoid.js"></script>
 </body>
 </html>
