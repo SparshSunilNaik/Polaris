@@ -95,7 +95,34 @@
       <p class="note">Waypoints, world geometry and outcomes come from the repository’s mission config, Gazebo world and retained mission summaries. The flight path between waypoints and the spacing of events are drawn schematically, not replayed from telemetry.</p>
     </div>
   </section>
-  <!-- CHAIN -->
+  <section id="chain" class="band chain" aria-labelledby="chain-title">
+    <div class="wrap">
+      <div class="intro">
+        <h2 id="chain-title">One command, six hands</h2>
+        <p>Every 100 ms the navigator proposes a velocity. Each layer below it may pass that command on, rewrite it, or replace it entirely, and only the Safety Supervisor’s output reaches PX4. Pick a situation and follow the command down.</p>
+      </div>
+
+      <div class="chain-grid">
+        <div class="situations">
+          <div class="sit-list" role="group" aria-label="Situation" id="sit-list"></div>
+          <div class="sit-explain" id="sit-explain" aria-live="polite"></div>
+        </div>
+
+        <div class="ladder-wrap">
+          <ol class="ladder" id="ladder"></ol>
+          <div class="shadow" id="shadow">
+            <p class="shadow-title">VLM shadow path</p>
+            <ol class="shadow-steps">
+              <li data-s="vlm">VLMWorker <span>qwen2.5vl:7b via Ollama</span></li>
+              <li data-s="fusion">SemanticFusion <span>3 agreeing results to confirm</span></li>
+              <li data-s="memory">Ego-Context memory <span>immutable snapshots and events</span></li>
+            </ol>
+            <p class="barrier"><span aria-hidden="true">⊘</span> No path to the Safety Supervisor or PX4</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
   <!-- AVOID -->
   <!-- OBSERVE -->
   <!-- RESULTS -->
@@ -111,5 +138,6 @@
 
 <script src="js/theme.js"></script>
 <script src="js/mission.js"></script>
+<script src="js/chain.js"></script>
 </body>
 </html>
