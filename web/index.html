@@ -171,7 +171,42 @@
       <p class="fine avoid-note">Thresholds from <code>config/reactive_avoidance.json</code>: clear 0.35, caution 0.45, stop 0.62, emergency 0.90. Risk is relative pseudo-depth, not metres. The navigator here always requests 0.40 m/s forward. In flight, a sidestep moves the obstacle out of the centre; here the scene stays frozen, so a held blockage eventually trips the 8 s episode limit and aborts, exactly as the controller would.</p>
     </div>
   </section>
-  <!-- OBSERVE -->
+  <section id="observe" class="band observe" aria-labelledby="observe-title">
+    <div class="wrap">
+      <div class="intro">
+        <h2 id="observe-title">Being there isn’t the same as seeing it</h2>
+        <p>An observation waypoint only completes when every gate holds at once, for long enough, on fresh evidence. The sliders start at the values the successful run actually recorded. Push any of them out of bounds.</p>
+      </div>
+
+      <div class="obs-grid">
+        <div class="gates" id="gates"></div>
+
+        <div class="obs-side">
+          <svg class="standoff" id="standoff" viewBox="-5 -5 10 10" role="img" aria-label="Top-down view of the drone relative to the observation target, with the 2.5 to 3.0 metre stand-off band.">
+            <circle r="3" class="so-band-outer"/><circle r="2.5" class="so-band-inner"/>
+            <circle r="0.28" class="so-target"/>
+            <g id="so-drone"><path d="M0 0 L-1.9 -0.9 A2.1 2.1 0 0 0 -1.9 0.9 Z" class="so-fov"/><circle r="0.32" class="so-body"/></g>
+          </svg>
+          <div class="obs-state">
+            <p class="obs-label">ObservationTracker</p>
+            <p class="obs-value" id="obs-state">OBSERVATION_COMPLETE</p>
+            <p class="obs-why" id="obs-why" aria-live="polite"></p>
+          </div>
+          <div class="fresh">
+            <p class="fresh-title">Fresh depth evidence <span id="fresh-count">3</span> of 3</p>
+            <div class="fresh-dots" id="fresh-dots" aria-hidden="true"></div>
+            <div class="fresh-btns">
+              <button type="button" class="btn-line" id="fresh-new">New depth frame</button>
+              <button type="button" class="btn-line" id="fresh-dup">Re-read last frame</button>
+              <button type="button" class="btn-line" id="fresh-reset">Reset</button>
+            </div>
+            <p class="fresh-note" id="fresh-note">The 10 Hz loop reads the same depth inference several times; only a new source frame with a later inference time counts.</p>
+          </div>
+        </div>
+      </div>
+      <p class="fine obs-note">Gates from <code>config/missions/polaris_demo.json</code>; starting values from the retained successful mission. Collision state, successful command transmission and the absence of a hard safety override are also required. These are waypoint-relative checks, not object recognition.</p>
+    </div>
+  </section>
   <!-- RESULTS -->
   <!-- RUN -->
 </main>
@@ -187,5 +222,6 @@
 <script src="js/mission.js"></script>
 <script src="js/chain.js"></script>
 <script src="js/avoid.js"></script>
+<script src="js/observe.js"></script>
 </body>
 </html>
